@@ -1,0 +1,7 @@
+name: trnascan
+channels:
+  - conda-forge
+  - bioconda
+dependencies:
+  - python>=3.6
+  - trnascan-se=2.0.12

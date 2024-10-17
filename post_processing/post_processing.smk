@@ -71,6 +71,10 @@ sys.path.insert(0, Path(workflow.basedir).parent.as_posix())
 from post_processing import TAXA_TARGETING, PROJECT_SPECIFIC, get_coassemblies, name_coassemblies, get_coassembly_info, get_genomes, name_genomes, get_genome_info, get_genome_novelty, get_genome_taxa_recovery, update_metadata
 METAPACKAGE = "/home/aroneys/m/db/singlem/S3.2.0.GTDB_r214.metapackage_20230428.smpkg"
 GTDBTK_MASH = "/work/microbiome/db/gtdb/gtdb_release220/mashdb"
+GTDB_ARCHAEAL_TAXONOMY = "/work/microbiome/db/gtdb/gtdb_release220/ar53_taxonomy_r220.tsv"
+GTDB_BACTERIAL_TAXONOMY = "/work/microbiome/db/gtdb/gtdb_release220/bac120_taxonomy_r220.tsv"
+NON_GTDB_GENOMES = "/work/microbiome/ibis/SRA/inputs/spire_genomes2.txt"
+NON_GTDB_CHECKM2 = "/work/microbiome/ibis/SRA/data/spire_checkm2_qualities.tsv"
 GUNC_DB = "/home/aroneys/s/aroneys/db/GUNC/gunc_db_progenomes2.1.dmnd"
 EGGNOG_DATA = "/work/microbiome/db/eggnog-mapper/2.1.3"
 
@@ -825,7 +829,7 @@ rule phylorank_red:
     threads: 64
     params:
         tree = lambda wildcards: "gtdbtk.ar53.decorated.tree" if wildcards.domain == "archaeal" else "gtdbtk.bac120.decorated.tree",
-        taxonomy = lambda wildcards: "/work/microbiome/db/gtdb/gtdb_release220/ar53_taxonomy_r220.tsv" if wildcards.domain == "archaeal" else "/work/microbiome/db/gtdb/gtdb_release220/bac120_taxonomy_r220.tsv",
+        taxonomy = lambda wildcards: GTDB_ARCHAEAL_TAXONOMY if wildcards.domain == "archaeal" else GTDB_BACTERIAL_TAXONOMY,
     localrule: True
     log:
         "compiled/{domain}_gtdbtk/phylorank.log"
@@ -846,7 +850,7 @@ rule tree2tbl:
     threads: 1
     params:
         domain = lambda wildcards: "archaea" if wildcards.domain == "archaeal" else "bacteria",
-        extra_genomes = "/work/microbiome/ibis/SRA/inputs/spire_genomes2.txt",
+        extra_genomes = NON_GTDB_GENOMES,
         input_tree = lambda wildcards: "gtdbtk.ar53.decorated.red_decorated.tree" if wildcards.domain == "archaeal" else "gtdbtk.bac120.decorated.red_decorated.tree",
     localrule: True
     log:
@@ -864,7 +868,7 @@ rule genome_checkm2:
         "compiled/genome_checkm2.tsv",
     threads: 1
     params:
-        spire = "/work/microbiome/ibis/SRA/data/spire_checkm2_qualities.tsv"
+        spire = NON_GTDB_CHECKM2
     localrule: True
     shell:
         "cut -f 1,2,3 {params.spire} > {output} && "
@@ -879,9 +883,9 @@ rule name_clades:
         directory("compiled/{domain}_gtdbtk/name_clades"),
     threads: 64
     params:
-        script = "/work/microbiome/ibis/SRA/scripts/name_clades.py",
+        script = "name_clades.py",
         domain = lambda wildcards: "d__Archaea" if wildcards.domain == "archaeal" else "d__Bacteria",
-        taxonomy = lambda wildcards: "/work/microbiome/db/gtdb/gtdb_release220/ar53_taxonomy_r220.tsv" if wildcards.domain == "archaeal" else "/work/microbiome/db/gtdb/gtdb_release220/bac120_taxonomy_r220.tsv",
+        taxonomy = lambda wildcards: GTDB_ARCHAEAL_TAXONOMY if wildcards.domain == "archaeal" else GTDB_BACTERIAL_TAXONOMY,
     localrule: True
     log:
         "compiled/{domain}_gtdbtk/name_clades.log"
@@ -1004,7 +1008,7 @@ rule comb_taxonomy:
         "compiled/{domain}_gtdbtk/comb_named_taxonomy.tsv",
     threads: 1
     params:
-        taxonomy = lambda wildcards: "/work/microbiome/db/gtdb/gtdb_release220/ar53_taxonomy_r220.tsv" if wildcards.domain == "archaeal" else "/work/microbiome/db/gtdb/gtdb_release220/bac120_taxonomy_r220.tsv",
+        taxonomy = lambda wildcards: GTDB_ARCHAEAL_TAXONOMY if wildcards.domain == "archaeal" else GTDB_BACTERIAL_TAXONOMY,
     localrule: True
     shell:
         "cat {input.names}/genome_taxonomy.tsv {params.taxonomy} > {output} "

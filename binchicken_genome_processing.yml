@@ -1,0 +1,13 @@
+name: binchicken_genome_processing
+channels:
+  - conda-forge
+  - bioconda
+dependencies:
+  - python>=3.6
+  - polars=0.19.12
+  - snakemake=7.32.4
+  - mamba
+  - ruamel.yaml>=0.15.99
+  - bird_tool_utils_python
+  - extern
+  - biopython

@@ -1,5 +1,7 @@
 __pycache__/
 *.py[cod]
+.vscode/
+Rplots.*
 
 binchicken_RBGs
 results/

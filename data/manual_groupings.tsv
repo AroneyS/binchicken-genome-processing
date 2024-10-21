@@ -1,0 +1,232 @@
+sci_name	group	metagroup	host_or_not
+groundwater metagenome	groundwater	aquatic	not_host
+wastewater metagenome	wastewater	aquatic	not_host
+bioreactor metagenome	bioreactor	engineered	not_host
+marine metagenome	marine	aquatic	not_host
+hydrothermal vent metagenome	hydrothermal vent	aquatic	not_host
+activated sludge metagenome	activated sludge	engineered	not_host
+freshwater metagenome	freshwater	aquatic	not_host
+microbial mat metagenome	microbial mat	terrestrial	not_host
+gut metagenome	gut	host	host
+human feces metagenome	gut	host	host
+human gut metagenome	gut	host	host
+sediment metagenome	sediment	terrestrial	not_host
+soil metagenome	soil	terrestrial	not_host
+salt marsh metagenome	salt marsh	terrestrial	not_host
+marine sediment metagenome	marine sediment	aquatic	not_host
+hot springs metagenome	hot springs	aquatic	not_host
+sludge metagenome	engineered (other)	engineered	not_host
+anaerobic digester metagenome	engineered (other)	engineered	not_host
+seawater metagenome	aquatic (other)	aquatic	not_host
+aquatic metagenome	aquatic (other)	aquatic	not_host
+landfill metagenome	terrestrial (other)	terrestrial	not_host
+subsurface metagenome	aquatic (other)	aquatic	not_host
+feces metagenome	gut	host	host
+aquifer metagenome	aquatic (other)	aquatic	not_host
+freshwater sediment metagenome	aquatic (other)	aquatic	not_host
+lake water metagenome	aquatic (other)	aquatic	not_host
+biofilm metagenome	engineered (other)	engineered	not_host
+riverine metagenome	aquatic (other)	aquatic	not_host
+rock metagenome	terrestrial (other)	terrestrial	not_host
+bioreactor sludge metagenome	engineered (other)	engineered	not_host
+aquaculture metagenome	engineered (other)	engineered	not_host
+mine drainage metagenome	engineered (other)	engineered	not_host
+salt lake metagenome	aquatic (other)	aquatic	not_host
+stromatolite metagenome	terrestrial (other)	terrestrial	not_host
+compost metagenome	terrestrial (other)	terrestrial	not_host
+fish gut metagenome	host (other)	host	host
+soda lake metagenome	aquatic (other)	aquatic	not_host
+marine plankton metagenome	aquatic (other)	aquatic	not_host
+rhizosphere metagenome	terrestrial (other)	terrestrial	not_host
+electrolysis cell metagenome	engineered (other)	engineered	not_host
+rat gut metagenome	host (other)	host	host
+wetland metagenome	aquatic (other)	aquatic	not_host
+peat metagenome	terrestrial (other)	terrestrial	not_host
+sponge metagenome	host (other)	host	host
+manure metagenome	terrestrial (other)	terrestrial	not_host
+biofilter metagenome	engineered (other)	engineered	not_host
+cold seep metagenome	aquatic (other)	aquatic	not_host
+sand metagenome	terrestrial (other)	terrestrial	not_host
+permafrost metagenome	terrestrial (other)	terrestrial	not_host
+epibiont metagenome	host (other)	host	host
+hydrocarbon metagenome	terrestrial (other)	terrestrial	not_host
+crustacean metagenome	host (other)	host	host
+industrial waste metagenome	engineered (other)	engineered	not_host
+estuary metagenome	aquatic (other)	aquatic	not_host
+beaver gut metagenome	host (other)	host	host
+synthetic metagenome	engineered (other)	engineered	not_host
+drinking water metagenome	engineered (other)	engineered	not_host
+microbial eukaryotic metagenome	host (other)	host	host
+pond metagenome	aquatic (other)	aquatic	not_host
+algae metagenome	aquatic (other)	aquatic	not_host
+mangrove metagenome	aquatic (other)	aquatic	not_host
+plant metagenome	host (other)	host	host
+saltern metagenome	aquatic (other)	aquatic	not_host
+plastic metagenome	engineered (other)	engineered	not_host
+lagoon metagenome	aquatic (other)	aquatic	not_host
+termite gut metagenome	host (other)	host	host
+surface metagenome	terrestrial (other)	terrestrial	not_host
+macroalgae metagenome	host (other)	host	host
+fish metagenome	host (other)	host	host
+fossil metagenome	terrestrial (other)	terrestrial	not_host
+invertebrate metagenome	host (other)	host	host
+protist metagenome	host (other)	host	host
+salt mine metagenome	engineered (other)	engineered	not_host
+insect metagenome	host (other)	host	host
+mollusc metagenome	host (other)	host	host
+alkali sediment metagenome	terrestrial (other)	terrestrial	not_host
+beach sand metagenome	terrestrial (other)	terrestrial	not_host
+bog metagenome	terrestrial (other)	terrestrial	not_host
+cave metagenome	terrestrial (other)	terrestrial	not_host
+coal metagenome	terrestrial (other)	terrestrial	not_host
+cold spring metagenome	terrestrial (other)	terrestrial	not_host
+dust metagenome	terrestrial (other)	terrestrial	not_host
+glacier metagenome	terrestrial (other)	terrestrial	not_host
+halite metagenome	terrestrial (other)	terrestrial	not_host
+hypolithon metagenome	terrestrial (other)	terrestrial	not_host
+ice metagenome	terrestrial (other)	terrestrial	not_host
+leaf litter metagenome	terrestrial (other)	terrestrial	not_host
+lichen crust metagenome	terrestrial (other)	terrestrial	not_host
+outdoor metagenome	terrestrial (other)	terrestrial	not_host
+rock porewater metagenome	terrestrial (other)	terrestrial	not_host
+snow metagenome	terrestrial (other)	terrestrial	not_host
+terrestrial metagenome	terrestrial (other)	terrestrial	not_host
+volcano metagenome	terrestrial (other)	terrestrial	not_host
+air metagenome	terrestrial (other)	terrestrial	not_host
+crude oil metagenome	terrestrial (other)	terrestrial	not_host
+activated carbon metagenome	engineered (other)	engineered	not_host
+aerosol metagenome	engineered (other)	engineered	not_host
+paper pulp metagenome	engineered (other)	engineered	not_host
+parchment metagenome	engineered (other)	engineered	not_host
+money metagenome	engineered (other)	engineered	not_host
+ballast water metagenome	engineered (other)	engineered	not_host
+bioanode metagenome	engineered (other)	engineered	not_host
+biocathode metagenome	engineered (other)	engineered	not_host
+biogas fermenter metagenome	engineered (other)	engineered	not_host
+chemical production metagenome	engineered (other)	engineered	not_host
+clinical metagenome	engineered (other)	engineered	not_host
+concrete metagenome	engineered (other)	engineered	not_host
+fermentation metagenome	engineered (other)	engineered	not_host
+fuel tank metagenome	engineered (other)	engineered	not_host
+gas well metagenome	engineered (other)	engineered	not_host
+hospital metagenome	engineered (other)	engineered	not_host
+indoor metagenome	engineered (other)	engineered	not_host
+microbial fuel cell metagenome	engineered (other)	engineered	not_host
+mine metagenome	engineered (other)	engineered	not_host
+mine tailings metagenome	engineered (other)	engineered	not_host
+mixed culture metagenome	engineered (other)	engineered	not_host
+museum specimen metagenome	engineered (other)	engineered	not_host
+oil field metagenome	engineered (other)	engineered	not_host
+oil metagenome	engineered (other)	engineered	not_host
+oil production facility metagenome	engineered (other)	engineered	not_host
+plastisphere metagenome	engineered (other)	engineered	not_host
+probiotic metagenome	engineered (other)	engineered	not_host
+runoff metagenome	engineered (other)	engineered	not_host
+silage metagenome	engineered (other)	engineered	not_host
+steel metagenome	engineered (other)	engineered	not_host
+urban metagenome	engineered (other)	engineered	not_host
+coral reef metagenome	aquatic (other)	aquatic	not_host
+hypersaline lake metagenome	aquatic (other)	aquatic	not_host
+aquatic viral metagenome	aquatic (other)	aquatic	not_host
+cow dung metagenome	host (other)	host	host
+decomposition metagenome	host (other)	host	host
+wood decay metagenome	host (other)	host	host
+rhizoplane metagenome	host (other)	host	host
+rice paddy metagenome	host (other)	host	host
+root associated fungus metagenome	host (other)	host	host
+termitarium metagenome	host (other)	host	host
+amphibian metagenome	host (other)	host	host
+annelid metagenome	host (other)	host	host
+ant metagenome	host (other)	host	host
+bat metagenome	host (other)	host	host
+bird metagenome	host (other)	host	host
+bovine gut metagenome	host (other)	host	host
+bovine metagenome	host (other)	host	host
+canine metagenome	host (other)	host	host
+blood metagenome	host (other)	host	host
+cetacean metagenome	host (other)	host	host
+chicken gut metagenome	host (other)	host	host
+ciliate metagenome	host (other)	host	host
+coral metagenome	host (other)	host	host
+crab metagenome	host (other)	host	host
+dinoflagellate metagenome	host (other)	host	host
+endophyte metagenome	host (other)	host	host
+eukaryotic metagenome	host (other)	host	host
+echinoderm metagenome	host (other)	host	host
+eye metagenome	host (other)	host	host
+feline metagenome	host (other)	host	host
+frog metagenome	host (other)	host	host
+horse metagenome	host (other)	host	host
+fungus metagenome	host (other)	host	host
+human bile metagenome	host (other)	host	host
+human blood metagenome	host (other)	host	host
+human eye metagenome	host (other)	host	host
+human lung metagenome	host (other)	host	host
+human metagenome	host (other)	host	host
+human milk metagenome	host (other)	host	host
+human nasopharyngeal metagenome	host (other)	host	host
+human oral metagenome	host (other)	host	host
+human saliva metagenome	host (other)	host	host
+human semen metagenome	host (other)	host	host
+human skeleton metagenome	host (other)	host	host
+human skin metagenome	host (other)	host	host
+human sputum metagenome	host (other)	host	host
+human urinary tract metagenome	host (other)	host	host
+human vaginal metagenome	host (other)	host	host
+human viral metagenome	host (other)	host	host
+insect gut metagenome	host (other)	host	host
+invertebrate gut metagenome	host (other)	host	host
+jellyfish metagenome	host (other)	host	host
+leaf metagenome	host (other)	host	host
+lichen metagenome	host (other)	host	host
+liver metagenome	host (other)	host	host
+lung metagenome	host (other)	host	host
+mite metagenome	host (other)	host	host
+mosquito metagenome	host (other)	host	host
+moss metagenome	host (other)	host	host
+mouse gut metagenome	host (other)	host	host
+mouse metagenome	host (other)	host	host
+mouse skin metagenome	host (other)	host	host
+nematode metagenome	host (other)	host	host
+oral metagenome	host (other)	host	host
+oral-nasopharyngeal metagenome	host (other)	host	host
+oyster metagenome	host (other)	host	host
+phycosphere metagenome	host (other)	host	host
+phyllosphere metagenome	host (other)	host	host
+pig gut metagenome	host (other)	host	host
+pig metagenome	host (other)	host	host
+plant fiber metagenome	host (other)	host	host
+pollen metagenome	host (other)	host	host
+psyllid metagenome	host (other)	host	host
+rat metagenome	host (other)	host	host
+reproductive system metagenome	host (other)	host	host
+respiratory tract metagenome	host (other)	host	host
+rodent metagenome	host (other)	host	host
+root metagenome	host (other)	host	host
+sea squirt metagenome	host (other)	host	host
+seagrass metagenome	host (other)	host	host
+seed metagenome	host (other)	host	host
+sheep gut metagenome	host (other)	host	host
+sheep metagenome	host (other)	host	host
+shrimp gut metagenome	host (other)	host	host
+skin metagenome	host (other)	host	host
+spider metagenome	host (other)	host	host
+starfish metagenome	host (other)	host	host
+stomach metagenome	host (other)	host	host
+symbiont metagenome	host (other)	host	host
+tick metagenome	host (other)	host	host
+tree metagenome	host (other)	host	host
+upper respiratory tract metagenome	host (other)	host	host
+urinary tract metagenome	host (other)	host	host
+urine metagenome	host (other)	host	host
+vaginal metagenome	host (other)	host	host
+viral metagenome	host (other)	host	host
+whole organism metagenome	host (other)	host	host
+dietary supplements metagenome	food	host	host
+food contamination metagenome	food	host	host
+food fermentation metagenome	food	host	host
+food metagenome	food	host	host
+food production metagenome	food	host	host
+honey metagenome	food	host	host
+milk metagenome	food	host	host
+wine metagenome	food	host	host

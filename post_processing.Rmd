@@ -1,0 +1,2285 @@
+---
+title: "Post-processing"
+author: "Samuel Aroney"
+date: "`r format(Sys.time(), '%d %B %Y')`"
+output:
+  bookdown::pdf_document2:
+    toc: FALSE
+  bookdown::html_document2: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, message = FALSE, warning = FALSE, error = FALSE, fig.width = 6, fig.asp = 0.618, out.width = "100%", fig.align = "center")
+
+library(ggVennDiagram)
+library(ggbreak)
+library(extrafont)
+library(hrbrthemes)
+library(ggalluvial)
+library(ggrepel)
+library(ggExtra)
+library(gt)
+library(gtExtras)
+library(webshot)
+library(cowplot)
+library(tidyverse)
+library(here)
+
+output_dir <- here("results", "post_processing_Rmd")
+dir.create(output_dir, recursive = TRUE)
+
+theme_set(theme_cowplot(font_family = "Arial"))
+
+colour_brewer <- setNames(append(as.list(RColorBrewer::brewer.pal(12, "Paired")), c("#737373", "#FFFFFF", "#000000")), c("blue", "darkblue", "green", "darkgreen", "red", "darkred", "orange", "darkorange", "purple", "darkpurple", "yellow", "brown", "grey", "white", "black"))
+novelty_levels <- c("Phylum", "Class", "Order", "Family", "Genus", "Species", "Not Novel")
+set.seed(42)
+
+signif_stars <- function(pval, ns="NS") {
+  case_when(
+    pval < 0.001 ~ "***",
+    pval < 0.01 ~ "**",
+    pval < 0.05 ~ "*",
+    TRUE ~ ns
+  )
+}
+```
+
+```{r wrangling}
+coassemble_metadata <- read_tsv(here("binchicken_RBGs", "metadata", "coassembly_metadata.tsv"))
+
+named_taxonomy <- bind_rows(
+    read_tsv(here("binchicken_RBGs", "archaeal_taxonomy", "genome_taxonomy.tsv")),
+    read_tsv(here("binchicken_RBGs", "bacterial_taxonomy", "genome_taxonomy.tsv"))
+  ) %>%
+  rename(name = genome, named_taxonomy = taxonomy)
+genome_metadata <- read_tsv(here("binchicken_RBGs", "metadata", "genome_metadata.tsv")) %>%
+  replace_na(list(rRNA_5S = 0, rRNA_16S = 0, rRNA_23S = 0, tRNAs = 0)) %>%
+  mutate(
+    phylum = str_detect(taxonomy, "p__;"),
+    class = str_detect(taxonomy, "c__;"),
+    order = str_detect(taxonomy, "o__;"),
+    family = str_detect(taxonomy, "f__;"),
+    genus = str_detect(taxonomy, "g__;"),
+    species = str_detect(taxonomy, "s__$"),
+    novelty = case_when(
+      phylum ~ "Phylum",
+      class ~ "Class",
+      order ~ "Order",
+      family ~ "Family",
+      genus ~ "Genus",
+      species ~ "Species",
+      TRUE ~ "Not Novel"
+      ),
+    quality = completeness - 5 * contamination,
+    rrna = rRNA_5S > 0 & rRNA_16S > 0 & rRNA_23S > 0,
+    trna = tRNAs >= 18,
+    genome_quality = case_when(
+      completeness > 90 & contamination < 5 & rrna & trna ~ "High quality",
+      completeness >= 90 & contamination < 5 ~ "Near complete",
+      completeness >= 50 & contamination < 10 ~ "Medium quality",
+      TRUE ~ "Partial"
+      ),
+    genome_quality = factor(genome_quality, levels = c("High quality", "Near complete", "Medium quality")),
+    rRNAs = pmap_int(list(rRNA_5S, rRNA_16S, rRNA_23S), ~ sum(..1 > 0, ..2 > 0, ..3 > 0)),
+    adjusted_genome_size = genome_size / (1 + contamination / 100) / (completeness / 100),
+    adjusted_gene_count = gene_count / (1 + contamination / 100) / (completeness / 100),
+  ) %>%
+  left_join(named_taxonomy) %>%
+  mutate(
+    named_novelty = case_when(
+      str_detect(named_taxonomy, "p__binchicken") ~ "Phylum novelty",
+      str_detect(named_taxonomy, "c__binchicken") ~ "Class novelty",
+      str_detect(named_taxonomy, "o__binchicken") ~ "Order novelty",
+      str_detect(named_taxonomy, "f__binchicken") ~ "Family novelty",
+      str_detect(named_taxonomy, "g__binchicken") ~ "Genus novelty",
+      !is.na(named_taxonomy) ~ "Species novelty",
+      TRUE ~ "Not Novel"
+      )
+    )
+
+pd <- bind_rows(
+    read_tsv(here("binchicken_RBGs", "archaeal_taxonomy", "phylogenetic_diversity.tsv"), comment = "[", skip = 1) %>% mutate(type = "archaea"),
+    read_tsv(here("binchicken_RBGs", "bacterial_taxonomy", "phylogenetic_diversity.tsv"), comment = "[", skip = 1) %>% mutate(type = "bacteria"),
+  ) %>%
+  rename(stat = 1, taxa = `No. Taxa`, PD_perc = `Percent PD`)
+
+pd_clade <- bind_rows(
+    read_tsv(here("binchicken_RBGs", "archaeal_taxonomy", "phylogenetic_diversity_clades.tsv")) %>% mutate(domain = "archaea"),
+    read_tsv(here("binchicken_RBGs", "bacterial_taxonomy", "phylogenetic_diversity_clades.tsv")) %>% mutate(domain = "bacteria"),
+  ) %>%
+  rename(
+    clade = Clade, taxa = Taxa, PD_perc = `Percent PD`,
+    taxa_out = `Out Taxa`, PD_out = `Out PD`, PD_out_perc = `Out Percent PD`,
+    taxa_in = `In Taxa`, PD_in = `In PD`, PD_in_perc = `In Percent PD`,
+    PG = `In PG`, PG_perc = `In Percent PG`
+    )
+
+sra_suitable <- read_csv(here("binchicken_RBGs", "metadata", "sra_suitable.txt"), col_names = c("run")) %>%
+  mutate(suitable = TRUE)
+ncbi_taxonomy <- bind_rows(
+  read_tsv(here("data", "ncbi_taxonomy.tsv")) %>% mutate(taxon_name = sci_name),
+  read_tsv(here("data", "manual_taxonomy.tsv"))
+  )
+manual_sample_taxonomy <- read_tsv(here("data", "manual_sample_taxonomy.tsv"))
+manual_groupings <- read_tsv(here("data", "manual_groupings.tsv"))
+host_or_not <- read_tsv(here("binchicken_RBGs", "metadata", "host_or_not_preds.csv")) %>%
+  mutate(host_or_not_comb = ifelse(is.na(host_or_not), prediction, host_or_not)) %>%
+  select(run = acc, host_or_not_pred = host_or_not_comb)
+microbial_fraction <- read_tsv(here("binchicken_RBGs", "metadata", "microbial_fractions.csv")) %>%
+  select(run = sample, read_fraction)
+sample_metadata <- read_tsv(here("binchicken_RBGs", "metadata", "sra_20230131_comb_metadata.tsv")) %>%
+  left_join(ncbi_taxonomy, by = "taxon_name") %>%
+  mutate(
+    sci_name = map2_chr(sci_name, run, ~ ifelse(is.na(.x), manual_sample_taxonomy %>% filter(samples == .y) %>% pull(sci_name) %>% first(), .x)),
+    parent_name = map2_chr(parent_name, run, ~ ifelse(is.na(.x), manual_sample_taxonomy %>% filter(samples == .y) %>% pull(parent_name) %>% first(), .x)),
+    superparent_name = map2_chr(superparent_name, run, ~ ifelse(is.na(.x), manual_sample_taxonomy %>% filter(samples == .y) %>% pull(superparent_name) %>% first(), .x)),
+  ) %>%
+  left_join(manual_groupings) %>%
+  left_join(sra_suitable) %>%
+  replace_na(list(suitable = FALSE)) %>%
+  left_join(host_or_not) %>%
+  left_join(microbial_fraction)
+
+low_rep_taxa <- read_tsv(here("data", "low_rep_taxa.txt"))
+genome_recovery <- read_tsv(here("data", "genome_recovery.tsv")) %>%
+  mutate(phylum = str_c("p__", target))
+low_rep_completed_runs <- read_tsv(here("data", "completed_runs.tsv"))
+low_rep_unbinned_sequences <- read_tsv(here("data", "unbinned_sequences.tsv"))
+low_rep_completion <- low_rep_unbinned_sequences %>%
+  left_join(low_rep_completed_runs) %>%
+  group_by(phylum) %>%
+  summarise(
+    unbinned_sequences = max(unbinned_sequences),
+    n_samples = max(n_samples),
+    n_samples_mean_coverage_gt_2 = max(n_samples_mean_coverage_gt_2),
+    n_samples_mean_coverage_gt_10 = max(n_samples_mean_coverage_gt_10),
+    completed_coassemblies = sum(completed_coassemblies, na.rm = TRUE),
+    target_sequences = max(total_targets, na.rm = TRUE),
+  )
+low_rep_recovery <- low_rep_taxa %>%
+  left_join(genome_recovery, by = c("phylum", "domain")) %>%
+  mutate(
+    recovered_count = phyla + class + order + family + genus + species + strain,
+    recovery = recovered_count > 0,
+    novelty = case_when(
+      phyla > 0 ~ "Phyla novelty",
+      class > 0 ~ "Class novelty",
+      order > 0 ~ "Order novelty",
+      family > 0 ~ "Family novelty",
+      genus > 0 ~ "Genus novelty",
+      species > 0 ~ "Species novelty",
+      strain > 0 ~ "Strain novelty",
+      )
+    ) %>%
+  left_join(low_rep_completion, by = "phylum") %>%
+  mutate(assembled = (!is.na(target)) & (completed_coassemblies > 0))
+
+genome_filtered <- genome_metadata %>%
+  filter(quality >= 50)
+
+global_clusters <- read_tsv(here("binchicken_RBGs", "metadata", "global_clusters.tsv"), col_names = c("cluster", "genome")) %>%
+  mutate(
+    cluster = (cluster %>% str_remove("^.*/") %>% str_remove("\\.[^\\.]+$") %>% str_remove("_genomic$")),
+    genome = (genome %>% str_remove("^.*/") %>% str_remove("\\.[^\\.]+$") %>% str_remove("_genomic$"))
+    )
+novel_species <- global_clusters %>%
+  inner_join(
+    genome_metadata %>% select(name),
+    by = c("genome" = "name")
+    ) %>%
+  filter(genome == cluster)
+
+magset_samples <- tribble(
+  ~magset, ~no_samples,
+  "GEM", 10450,
+  "OceanDNA", 2057,
+  "SPIRE", 99146,
+  "SMAG", 3304,
+  "Tengchong", 152,
+  "binchicken", 1286,
+)
+clade_novelty <- bind_rows(
+  read_tsv(here("data", "archaeal_clade_novelty.tsv")) %>% mutate(domain = "archaea"),
+  read_tsv(here("data", "bacterial_clade_novelty.tsv")) %>% mutate(domain = "bacteria"),
+  ) %>%
+  pivot_longer(-c(domain, level), names_to = "magset", values_to = "count") %>%
+  replace_na(list(count = 0)) %>%
+  group_by(magset, level) %>%
+  summarise(count = sum(count)) %>%
+  inner_join(magset_samples) %>%
+  mutate(count_per_sample = count / no_samples)
+
+##################
+### Prevalence ###
+##################
+prevalence <- read_tsv(here("binchicken_RBGs", "metadata", "singlem_condense_summary.tsv")) %>%
+  mutate(genome = str_remove(species, "^s__[^ ]+ ")) %>%
+  left_join(sample_metadata, by = c("sample" = "run"))
+
+prevalence_filtered <- prevalence %>%
+  inner_join(genome_filtered, by = c("genome" = "name")) %>%
+  inner_join(novel_species) %>%
+  left_join(sample_metadata %>% select(sample = run, taxon_name))
+
+phyla_prevalence <- read_tsv(here("binchicken_RBGs", "metadata", "singlem_condense_phyla.tsv")) %>%
+  left_join(sample_metadata, by = c("sample" = "run"))
+
+#####################
+### Assign rarity ###
+#####################
+prevalence_levels <- c(
+  "Strictly abundant",
+  "Conditionally abundant",
+  "Rare and abundant",
+  "Strictly moderate",
+  "Conditionally rare",
+  "Strictly rare"
+)
+prevalence_colours <- c(
+  "#c51b7d",
+  "#e9a3c9",
+  "#fde0ef",
+  "#e6f5d0",
+  "#a1d76a",
+  "#4d9221"
+)
+
+prevalence_source <- prevalence_filtered %>%
+  select(sample, coverage, rel_abund_perc, genome) %>%
+  left_join(genome_metadata %>% select(genome = name, coassembly)) %>%
+  left_join(coassemble_metadata %>% select(coassembly = name, coassembly_samples = samples)) %>%
+  separate_rows(coassembly_samples, sep = ",") %>%
+  filter(sample == coassembly_samples)
+
+summary_abundance_source <- prevalence_source %>%
+  group_by(genome) %>%
+  summarise(
+    max_source_abund = max(rel_abund_perc) / 100,
+    max_source_coverage = max(coverage),
+    sum_source_coverage = sum(coverage),
+    )
+
+rarity_cutoff <- 0.1
+abundant_cutoff <- 1
+prev_summary <- prevalence_filtered %>%
+  group_by(genome, genome_quality, named_novelty) %>%
+  summarise(
+    mean_abundance = mean(rel_abund_perc) / 100,
+    abundance = mean(rel_abund_perc, trim = 0.1) / 100,
+    prevalence = n(),
+    q10 = quantile(rel_abund_perc, 0.1) / 100,
+    median_abund = median(rel_abund_perc) / 100,
+    q90 = quantile(rel_abund_perc, 0.9) / 100,
+    max_abund = max(rel_abund_perc) / 100,
+    max_coverage = max(coverage),
+    all_abundant = mean(rel_abund_perc >= abundant_cutoff),
+    all_rare = mean(rel_abund_perc < rarity_cutoff),
+    none_abundant = mean(rel_abund_perc < abundant_cutoff),
+    none_rare = mean(rel_abund_perc >= rarity_cutoff),
+    taxon_prevalence = length(unique(taxon_name)),
+    sci_names = length(unique(sci_name)),
+    ) %>%
+  left_join(summary_abundance_source) %>%
+  mutate(
+    genome_rarity = case_when(
+      all_abundant > 0.95 ~ "Strictly abundant",
+      all_rare > 0.95 ~ "Strictly rare",
+      (none_abundant > 0.95) & (none_rare > 0.95) ~ "Strictly moderate",
+      none_abundant > 0.95 ~ "Conditionally rare",
+      none_rare > 0.95 ~ "Conditionally abundant",
+      TRUE ~ "Rare and abundant", # Conditionally rare and abundant
+      ),
+    genome_rarity = factor(genome_rarity, levels = prevalence_levels)
+    )
+
+##############################
+### Known species fraction ###
+##############################
+sra_species_assignment <- read_tsv(here("binchicken_RBGs", "metadata", "singlem_known_species_spire.tsv")) %>%
+  rename(spire_fraction = fraction) %>%
+  inner_join(
+    read_tsv(here("binchicken_RBGs", "metadata", "singlem_known_species.tsv")) %>% rename(bc_fraction = fraction),
+    by = "sample"
+    ) %>%
+  mutate(bc_improvement = bc_fraction - spire_fraction) %>%
+  left_join(sample_metadata, by = c("sample" = "run")) %>%
+  filter(suitable, read_fraction >= 1)
+
+sra_species_used <- sra_species_assignment %>%
+  inner_join(coassemble_metadata %>% select(sample = samples) %>% separate_rows(sample, sep = ",") %>% distinct())
+
+sra_species_used_summary <- sra_species_used %>%
+  group_by(metagroup, group) %>%
+  summarise(
+    used_spire_fraction = median(spire_fraction),
+    used_bc_fraction = median(bc_fraction),
+    used_bc_improvement = used_bc_fraction - used_spire_fraction,
+    used_n = n()
+  ) %>%
+  arrange(desc(used_bc_improvement))
+
+sra_species_summary <- sra_species_assignment %>%
+  group_by(metagroup, group) %>%
+  summarise(
+    spire_fraction = median(spire_fraction),
+    bc_fraction = median(bc_fraction),
+    bc_improvement = bc_fraction - spire_fraction,
+    n = n()
+  ) %>%
+  arrange(desc(bc_improvement)) %>%
+  left_join(sra_species_used_summary)
+
+metagroup_species_used_summary <- sra_species_used %>%
+  group_by(metagroup) %>%
+  summarise(
+    used_spire_fraction = median(spire_fraction),
+    used_bc_fraction = median(bc_fraction),
+    used_bc_improvement = used_bc_fraction - used_spire_fraction,
+    used_n = n()
+  ) %>%
+  arrange(desc(used_bc_improvement))
+
+metagroup_species_summary <- sra_species_assignment %>%
+  group_by(metagroup) %>%
+  summarise(
+    spire_fraction = median(spire_fraction),
+    bc_fraction = median(bc_fraction),
+    bc_improvement = bc_fraction - spire_fraction,
+    n = n()
+  ) %>%
+  arrange(desc(bc_improvement)) %>%
+  left_join(metagroup_species_used_summary)
+
+evaluation <- read_tsv(here("binchicken_RBGs", "metadata", "evaluate.tsv")) %>%
+  left_join(coassemble_metadata %>% mutate(is_complete = TRUE) %>% select(coassembly = name, source_samples = samples, is_complete)) %>%
+  replace_na(list(is_complete = FALSE)) %>%
+  mutate(
+    is_target = !is.na(target) & is_complete,
+    is_recovered = !is.na(genome),
+    source_coverage_trun = ifelse(source_coverage > 20, 20, source_coverage),
+    target_cutoff = source_coverage > 10,
+    )
+
+sra_single_ended <- read_tsv(here("data", "sra_single_ended.txt"), col_names = c("sample"))
+
+#########################
+### Load DRAM outputs ###
+#########################
+dram_output_dirs <- c(
+  here("binchicken_RBGs", "metabolism", "novel_phyla_set1"),
+  here("binchicken_RBGs", "metabolism", "novel_phyla_set2")
+)
+
+dram_distillate <- tibble(
+  gene_id = character(0),
+  gene_description = character(0),
+  module = character(0),
+  header = character(0),
+  subheader = character(0),
+  sheet = character(0),
+  genome = character(0),
+  call = numeric(0),
+)
+for (dram_output_dir in dram_output_dirs) {
+  dram_distillate <- dram_distillate %>% bind_rows(
+      bind_rows(
+          readxl::read_excel(here(dram_output_dir, "metabolism_summary.xlsx"), sheet = "MISC") %>% mutate(sheet = "MISC"),
+          readxl::read_excel(here(dram_output_dir, "metabolism_summary.xlsx"), sheet = "carbon utilization") %>% mutate(sheet = "carbon utilization"),
+          readxl::read_excel(here(dram_output_dir, "metabolism_summary.xlsx"), sheet = "Transporters") %>% mutate(sheet = "Transporters"),
+          readxl::read_excel(here(dram_output_dir, "metabolism_summary.xlsx"), sheet = "Energy") %>% mutate(sheet = "Energy"),
+          readxl::read_excel(here(dram_output_dir, "metabolism_summary.xlsx"), sheet = "Organic Nitrogen") %>% mutate(sheet = "Organic Nitrogen"),
+          readxl::read_excel(here(dram_output_dir, "metabolism_summary.xlsx"), sheet = "carbon utilization (Woodcroft)") %>% mutate(sheet = "carbon utilization (Woodcroft)")
+      ) %>%
+      pivot_longer(!c(gene_id, gene_description, module, header, subheader, sheet), names_to = "genome", values_to = "call") %>%
+      mutate(call = as.numeric(call))
+    )
+}
+
+dram_module_proportions <- dram_distillate %>%
+  group_by(genome, sheet, header, subheader, module) %>%
+  summarise(prop_genes = sum(call > 0) / n())
+
+dram_distillate <- dram_distillate %>%
+  left_join(dram_module_proportions, by = c("genome", "sheet", "header", "subheader", "module"))
+
+dram_product <- tibble(
+  genome = character(0),
+  pathway = character(0),
+  call = numeric(0)
+)
+for (dram_output_dir in dram_output_dirs) {
+  dram_product <- dram_product %>% bind_rows(
+      read_tsv(here(dram_output_dir, "product.tsv")) %>%
+        pivot_longer(-genome, names_to = "pathway", values_to = "call") %>%
+        filter(call >= 0.5)
+    )
+}
+
+genome_unannotated <- read_tsv(here("binchicken_RBGs", "metabolism", "unannotated_genes.tsv")) %>%
+  mutate(genome = genome %>% str_remove("^RS_|^GB_") %>% str_remove("_genomic$"))
+
+genome_magset <- read_tsv(here("data", "genome_magset.tsv")) %>%
+  left_join(prev_summary %>% ungroup() %>% select(genome, genome_rarity)) %>%
+  mutate(genome = str_remove(genome, "_genomic$")) %>%
+  left_join(global_clusters) %>%
+  filter(genome == cluster) %>%
+  mutate(
+    maggroup = case_when(
+      magset == "binchicken" & is.na(genome_rarity) ~ "Undetected",
+      is.na(genome_rarity) ~ magset,
+      TRUE ~ as.character(genome_rarity)
+      ),
+    maggroup = factor(maggroup, levels = c(
+      "UHGG", "Tengchong", "OceanDNA", "GEM", "SMAG", "SPIRE", "GTDB",
+      "Strictly abundant",
+      "Conditionally abundant",
+      "Rare and abundant",
+      "Strictly moderate",
+      "Conditionally rare",
+      "Strictly rare",
+      "Undetected"
+      )),
+    magset = factor(magset,
+      levels = c("UHGG", "Tengchong", "OceanDNA", "GEM", "SMAG", "SPIRE", "GTDB", "binchicken"),
+      labels = c("UHGG", "Tengchong", "OceanDNA", "GEM", "SMAG", "SPIRE", "GTDB", "RBG")
+      )
+  )
+genome_teas <- read_tsv(here("binchicken_RBGs", "metabolism", "genome_teas.tsv")) %>%
+  full_join(
+    bind_rows(
+      read_tsv(here("binchicken_RBGs", "metabolism", "aerobicity.tsv"), col_names = c("protein", "annotations", "genome")),
+      read_tsv(here("binchicken_RBGs", "metabolism", "aerobicity_spire_and_r220.tsv"), col_names = c("protein", "annotations", "genome")),
+      ) %>%
+    select(genome)
+    ) %>%
+  mutate(genome = genome %>% str_remove("^RS_|^GB_") %>% str_remove("_genomic$")) %>%
+  inner_join(genome_magset)
+
+genome_unannotated <- genome_unannotated %>%
+  inner_join(genome_magset)
+
+genome_teas_selected <- genome_teas %>%
+  mutate(
+    tea_group = case_when(
+      str_detect(pathway, "fermentation") ~ "Fermentation",
+      str_detect(pathway, "Nitrate") ~ "Nitrate",
+      str_detect(pathway, "Nitrite") ~ "Nitrite",
+      str_detect(pathway, "Sulfate") ~ "Sulfate",
+      str_detect(pathway, "Sulfite") ~ "Sulfite",
+      pathway == "MHC" ~ "MHC",
+      pathway == "aerobic" ~ "Aerobic",
+      str_detect(pathway, "Methanogenesis") ~ "Methanogenesis",
+      str_detect(pathway, "Se") ~ "Selenate",
+      str_detect(pathway, "Fe") ~ "Iron",
+      TRUE ~ "Unknown",
+    )
+  ) %>%
+  distinct(magset, maggroup, genome, tea_group) %>%
+  group_by(magset, maggroup, genome) %>%
+  summarise(
+    tea_group = case_when(
+      any(tea_group == "Aerobic") ~ "Aerobic",
+      any(tea_group == "Iron") ~ "Iron",
+      any(tea_group == "Nitrate") ~ "Nitrate",
+      any(tea_group == "Nitrite") ~ "Nitrite",
+      any(tea_group == "Selenate") ~ "Selenate",
+      any(tea_group == "Sulfate") ~ "Sulfate",
+      any(tea_group == "Sulfite") ~ "Sulfite",
+      any(tea_group == "Methanogenesis") ~ "Methanogenesis",
+      any(tea_group == "Fermentation") ~ "Fermentation",
+      any(tea_group == "MHC") ~ "MHC",
+      TRUE ~ "Unknown"
+      )
+    )
+
+########################
+### Rarefied genomes ###
+########################
+rarefied_genomes <- bind_rows(
+    read_tsv(here("data", "rarefy", "rarefy_bacteria_phyla.tsv")) %>% mutate(taxon = "phylum", domain = "d__Bacteria", first = FALSE),
+    read_tsv(here("data", "rarefy", "rarefy_archaea_phyla.tsv")) %>% mutate(taxon = "phylum", domain = "d__Archaea", first = FALSE),
+    read_tsv(here("data", "rarefy", "rarefy_bacteria_classes.tsv")) %>% mutate(taxon = "class", domain = "d__Bacteria", first = FALSE),
+    read_tsv(here("data", "rarefy", "rarefy_archaea_classes.tsv")) %>% mutate(taxon = "class", domain = "d__Archaea", first = FALSE),
+    read_tsv(here("data", "rarefy", "rarefy_bacteria_orders.tsv")) %>% mutate(taxon = "order", domain = "d__Bacteria", first = FALSE),
+    read_tsv(here("data", "rarefy", "rarefy_archaea_orders.tsv")) %>% mutate(taxon = "order", domain = "d__Archaea", first = FALSE),
+    read_tsv(here("data", "rarefy", "rarefy_bacteria_families.tsv")) %>% mutate(taxon = "family", domain = "d__Bacteria", first = FALSE),
+    read_tsv(here("data", "rarefy", "rarefy_archaea_families.tsv")) %>% mutate(taxon = "family", domain = "d__Archaea", first = FALSE),
+    read_tsv(here("data", "rarefy", "rarefy_bacteria_genera.tsv")) %>% mutate(taxon = "genus", domain = "d__Bacteria", first = FALSE),
+    read_tsv(here("data", "rarefy", "rarefy_archaea_genera.tsv")) %>% mutate(taxon = "genus", domain = "d__Archaea", first = FALSE),
+    read_tsv(here("data", "rarefy", "rarefy_bacteria_species.tsv")) %>% mutate(taxon = "species", domain = "d__Bacteria", first = FALSE),
+    read_tsv(here("data", "rarefy", "rarefy_archaea_species.tsv")) %>% mutate(taxon = "species", domain = "d__Archaea", first = FALSE),
+    tibble(
+      step = 0, unique = 0,
+      taxon = c("phylum", "class", "order", "family", "genus", "species", "phylum", "class", "order", "family", "genus", "species"),
+      domain = c("d__Bacteria", "d__Bacteria", "d__Bacteria", "d__Bacteria", "d__Bacteria", "d__Bacteria", "d__Archaea", "d__Archaea", "d__Archaea", "d__Archaea", "d__Archaea", "d__Archaea"),
+      first = TRUE
+      )
+  ) %>%
+  group_by(taxon, domain) %>%
+  mutate(last = step == max(step)) %>%
+  filter(!(taxon == "phylum" & domain == "d__Archaea"))
+
+rarefied_genomes_coassembly <- bind_rows(
+    read_tsv(here("data", "rarefy", "rarefy_coassembly_bacteria_phyla.tsv")) %>% mutate(taxon = "phylum", domain = "d__Bacteria", first = FALSE),
+    read_tsv(here("data", "rarefy", "rarefy_coassembly_archaea_phyla.tsv")) %>% mutate(taxon = "phylum", domain = "d__Archaea", first = FALSE),
+    read_tsv(here("data", "rarefy", "rarefy_coassembly_bacteria_classes.tsv")) %>% mutate(taxon = "class", domain = "d__Bacteria", first = FALSE),
+    read_tsv(here("data", "rarefy", "rarefy_coassembly_archaea_classes.tsv")) %>% mutate(taxon = "class", domain = "d__Archaea", first = FALSE),
+    read_tsv(here("data", "rarefy", "rarefy_coassembly_bacteria_orders.tsv")) %>% mutate(taxon = "order", domain = "d__Bacteria", first = FALSE),
+    read_tsv(here("data", "rarefy", "rarefy_coassembly_archaea_orders.tsv")) %>% mutate(taxon = "order", domain = "d__Archaea", first = FALSE),
+    read_tsv(here("data", "rarefy", "rarefy_coassembly_bacteria_families.tsv")) %>% mutate(taxon = "family", domain = "d__Bacteria", first = FALSE),
+    read_tsv(here("data", "rarefy", "rarefy_coassembly_archaea_families.tsv")) %>% mutate(taxon = "family", domain = "d__Archaea", first = FALSE),
+    read_tsv(here("data", "rarefy", "rarefy_coassembly_bacteria_genera.tsv")) %>% mutate(taxon = "genus", domain = "d__Bacteria", first = FALSE),
+    read_tsv(here("data", "rarefy", "rarefy_coassembly_archaea_genera.tsv")) %>% mutate(taxon = "genus", domain = "d__Archaea", first = FALSE),
+    read_tsv(here("data", "rarefy", "rarefy_coassembly_bacteria_species.tsv")) %>% mutate(taxon = "species", domain = "d__Bacteria", first = FALSE),
+    read_tsv(here("data", "rarefy", "rarefy_coassembly_archaea_species.tsv")) %>% mutate(taxon = "species", domain = "d__Archaea", first = FALSE),
+    tibble(
+      step = 0, unique = 0,
+      taxon = c("phylum", "class", "order", "family", "genus", "species", "phylum", "class", "order", "family", "genus", "species"),
+      domain = c("d__Bacteria", "d__Bacteria", "d__Bacteria", "d__Bacteria", "d__Bacteria", "d__Bacteria", "d__Archaea", "d__Archaea", "d__Archaea", "d__Archaea", "d__Archaea", "d__Archaea"),
+      first = TRUE
+      )
+  ) %>%
+  group_by(taxon, domain) %>%
+  mutate(last = step == max(step)) %>%
+  filter(!(taxon == "phylum" & domain == "d__Archaea"))
+
+################
+### Proteins ###
+################
+protein_base_dir <- here("data", "proteins")
+protein_stats <- read_tsv(here(protein_base_dir, "processed_stats.tsv"))
+protein_props <- read_tsv(here(protein_base_dir, "processed_prop.tsv")) %>%
+  mutate(
+    count_mil = round(count / 10**6, 0),
+    count_100t = round(count / 10**5, 0),
+    )
+protein_rarefy <- bind_rows(
+    read_tsv(here(protein_base_dir, "processed_rarefy_bc.tsv")) %>% mutate(rarefy = "bc", first = FALSE),
+    tibble(step = 0, unique = 0, rarefy = c("all", "nonbc", "bc"), first = TRUE)
+  ) %>%
+  group_by(rarefy) %>%
+  mutate(last = step == max(step)) %>%
+  ungroup()
+```
+
+```{r genome-quality}
+genome_legend <- genome_filtered %>%
+  group_by(genome_quality) %>%
+  summarise(
+    n = n(),
+    perc = n() / nrow(genome_filtered) * 100
+  ) %>%
+  mutate(
+    label = str_c(genome_quality, " (", n, " genomes; ", round(perc, 1), "%)", sep = ""),
+  )
+genome_legend_colours <- c(colour_brewer$darkred, colour_brewer$darkblue, colour_brewer$blue)
+
+##########################
+### Individual metrics ###
+##########################
+bar_layers <- list(
+  scale_fill_manual(
+    breaks = genome_legend$genome_quality,
+    labels = genome_legend$label,
+    values = genome_legend_colours
+    ),
+  theme(legend.position = "none")
+)
+
+completeness_bar <- genome_filtered %>%
+  ggplot(aes(completeness, fill = genome_quality)) +
+  bar_layers +
+  geom_histogram(aes(y = after_stat(100 * count / sum(count))), binwidth = 2) +
+  xlab("Completeness (%)") +
+  ylab("")
+completeness_bar
+ggsave(here(output_dir, "completeness_bar.png"), dpi = 600, width = 12, height = 7)
+
+contamination_bar <- genome_filtered %>%
+  ggplot(aes(y = contamination, fill = genome_quality)) +
+  bar_layers +
+  geom_histogram(aes(x = after_stat(100 * count / sum(count))), binwidth = 0.5) +
+  xlab("") +
+  ylab("Contamination (%)")
+contamination_bar
+ggsave(here(output_dir, "contamination_bar.png"), dpi = 600, width = 12, height = 7)
+
+contigs_bar <- genome_filtered %>%
+  ggplot(aes(contigs_total, fill = genome_quality)) +
+  bar_layers +
+  geom_histogram(aes(y = after_stat(100 * count / sum(count))), binwidth = 20) +
+  xlab("No. of contigs") +
+  ylab("Genomes (%)") +
+  coord_cartesian(xlim = c(0, 1000))
+contigs_bar
+ggsave(here(output_dir, "contigs_bar.png"), dpi = 600, width = 12, height = 7)
+
+trnas_bar <- genome_filtered %>%
+  ggplot(aes(y = tRNAs, fill = genome_quality)) +
+  bar_layers +
+  geom_histogram(aes(x = after_stat(100 * count / sum(count))), binwidth = 1) +
+  xlab("") +
+  ylab("No. of tRNAs")
+trnas_bar
+ggsave(here(output_dir, "trnas_bar.png"), dpi = 600, width = 12, height = 7)
+
+rrnas_bar <- genome_filtered %>%
+  ggplot(aes(rRNAs, fill = genome_quality)) +
+  bar_layers +
+  geom_histogram(aes(y = after_stat(100 * count / sum(count))), binwidth = 1) +
+  xlab("# of rRNAs (5S, 16S, 23S)") +
+  ylab("")
+rrnas_bar
+ggsave(here(output_dir, "rrnas_bar.png"), dpi = 600, width = 12, height = 7)
+
+rrnas_prop <- genome_filtered %>%
+  select(name, rRNA_5S, rRNA_16S, rRNA_23S) %>%
+  pivot_longer(c(rRNA_5S, rRNA_16S, rRNA_23S), names_to = "rRNA", values_to = "count") %>%
+  mutate(present = count > 0) %>%
+  ggplot(aes(rRNA, fill = present)) +
+  geom_bar() +
+  xlab("rRNA") +
+  ylab("Genomes (%)") +
+  scale_fill_manual(values = c(colour_brewer$darkred, colour_brewer$blue))
+rrnas_prop
+ggsave(here(output_dir, "rrnas_prop.png"), dpi = 600, width = 12, height = 7)
+
+gc_bar <- genome_filtered %>%
+  ggplot(aes(gc, fill = genome_quality)) +
+  bar_layers +
+  geom_histogram(aes(y = after_stat(100 * count / sum(count))), binwidth = 0.05) +
+  xlab("GC (%)") +
+  ylab("Genomes (%)")
+gc_bar
+ggsave(here(output_dir, "gc_bar.png"), dpi = 600, width = 12, height = 7)
+
+gene_counts_bar <- genome_filtered %>%
+  ggplot(aes(gene_count, fill = genome_quality)) +
+  bar_layers +
+  geom_histogram(aes(y = after_stat(100 * count / sum(count)))) +
+  scale_x_continuous(labels = ~ format(.x, scientific = FALSE)) +
+  xlab("Gene counts") +
+  ylab("Genomes (%)")
+gene_counts_bar
+ggsave(here(output_dir, "gene_counts_bar.png"), dpi = 600, width = 12, height = 7)
+
+adj_gene_counts_bar <- genome_filtered %>%
+  ggplot(aes(y = adjusted_gene_count, fill = genome_quality)) +
+  bar_layers +
+  geom_histogram(aes(x = after_stat(100 * count / sum(count)))) +
+  scale_y_continuous(labels = ~ format(.x, scientific = FALSE)) +
+  xlab("") +
+  ylab("Adjusted gene counts")
+adj_gene_counts_bar
+ggsave(here(output_dir, "adj_gene_counts_bar.png"), dpi = 600, width = 12, height = 7)
+
+genome_size_bar <- genome_filtered %>%
+  ggplot(aes(genome_size / 10**6, fill = genome_quality)) +
+  bar_layers +
+  geom_histogram(aes(y = after_stat(100 * count / sum(count)))) +
+  xlab("Genome size (Mbp)") +
+  ylab("Genomes (%)")
+genome_size_bar
+ggsave(here(output_dir, "genome_size_bar.png"), dpi = 600, width = 12, height = 7)
+
+adj_genome_size_bar <- genome_filtered %>%
+  ggplot(aes(adjusted_genome_size / 10**6, fill = genome_quality)) +
+  bar_layers +
+  geom_histogram(aes(y = after_stat(100 * count / sum(count)))) +
+  xlab("Adjusted genome size (Mbp)") +
+  ylab("")
+adj_genome_size_bar
+ggsave(here(output_dir, "adj_genome_size_bar.png"), dpi = 600, width = 12, height = 7)
+
+red_value_bar <- genome_filtered %>%
+  replace_na(list(red_value = 1)) %>%
+  ggplot(aes(red_value, fill = genome_quality)) +
+  bar_layers +
+  geom_histogram(aes(y = after_stat(100 * count / sum(count)))) +
+  xlab("RED value") +
+  ylab("Genomes (%)")
+red_value_bar
+ggsave(here(output_dir, "red_value_bar.png"), dpi = 600, width = 12, height = 7)
+
+red_value_zoom_bar <- genome_filtered %>%
+  replace_na(list(red_value = 1)) %>%
+  filter(red_value < 0.5) %>%
+  ggplot(aes(red_value, fill = genome_quality)) +
+  bar_layers +
+  geom_histogram(aes(y = after_stat(100 * count / sum(count)))) +
+  xlab("RED value") +
+  ylab("Genomes (%)")
+red_value_zoom_bar
+ggsave(here(output_dir, "red_value_zoom_bar.png"), dpi = 600, width = 12, height = 7)
+
+#####################################
+### Completeness vs contamination ###
+#####################################
+completeness_vs_contamination <- genome_filtered %>%
+  ggplot(aes(completeness, contamination, fill = genome_quality)) +
+  geom_point(shape = 21) +
+  scale_fill_manual(
+    breaks = genome_legend$genome_quality,
+    labels = genome_legend$label,
+    values = genome_legend_colours
+    ) +
+  xlab("Completeness (%)") +
+  ylab("Contamination (%)") +
+  theme(legend.position = c(0.1, 0.9), legend.title = element_blank())
+completeness_vs_contamination
+ggsave(here(output_dir, "completeness_vs_contamination.png"), dpi = 600, width = 12, height = 7)
+
+genome_quality_plot <- cowplot::plot_grid(
+  completeness_bar + coord_cartesian(xlim = c(50, 100)) + theme(axis.title.x = element_blank(), axis.text.x = element_blank()),
+  NULL,
+  completeness_vs_contamination + coord_cartesian(xlim = c(50, 100), ylim = c(0, 10)),
+  contamination_bar + coord_cartesian(ylim = c(0, 10)) + theme(axis.title.y = element_blank(), axis.text.y = element_blank()),
+  ncol = 2,
+  nrow = 2,
+  rel_widths = c(1, 0.1),
+  rel_heights = c(0.1, 1)
+)
+genome_quality_plot
+ggsave(here(output_dir, "genome_quality.png"), dpi = 600, width = 12, height = 7)
+ggsave(here(output_dir, "genome_quality.svg"), dpi = 600, width = 12, height = 7)
+
+##################################
+### Genome size vs gene counts ###
+##################################
+size_vs_genes <- genome_filtered %>%
+  ggplot(aes(adjusted_genome_size / 10**6, adjusted_gene_count, fill = genome_quality)) +
+  geom_jitter(shape = 21) +
+  scale_fill_manual(
+    breaks = genome_legend$genome_quality,
+    labels = genome_legend$label,
+    values = genome_legend_colours
+    ) +
+  xlab("Adjusted genome size (Mbp)") +
+  ylab("Adjusted gene count") +
+  theme(legend.position = c(0.6, 0.1), legend.title = element_blank())
+size_vs_genes
+ggsave(here(output_dir, "size_vs_genes.png"), dpi = 600, width = 12, height = 7)
+
+left_panel <- cowplot::plot_grid(
+  adj_genome_size_bar + coord_cartesian(xlim = c(0, 18)) + theme(axis.title.x = element_blank(), axis.text.x = element_blank()),
+  size_vs_genes + coord_cartesian(xlim = c(0, 18), ylim = c(0, 15000)),
+  ncol = 1,
+  rel_heights = c(0.1, 1),
+  align = "v"
+)
+right_panel <- cowplot::plot_grid(
+  NULL,
+  adj_gene_counts_bar + coord_cartesian(ylim = c(0, 15000)) + theme(axis.title.y = element_blank(), axis.text.y = element_blank()),
+  ncol = 1,
+  rel_heights = c(0.1, 1)
+)
+cowplot::plot_grid(
+  left_panel,
+  right_panel,
+  ncol = 2,
+  rel_widths = c(1, 0.1)
+)
+ggsave(here(output_dir, "genome_sizes.png"), dpi = 600, width = 12, height = 7)
+ggsave(here(output_dir, "genome_sizes.svg"), dpi = 600, width = 12, height = 7)
+
+####################
+### rRNA vs tRNA ###
+####################
+rrna_vs_trna <- genome_filtered %>%
+  ggplot(aes(rRNAs, tRNAs, fill = genome_quality)) +
+  geom_jitter(shape = 21) +
+  scale_fill_manual(
+    breaks = genome_legend$genome_quality,
+    labels = genome_legend$label,
+    values = genome_legend_colours
+    ) +
+  xlab("# of rRNAs (5S, 16S, 23S)") +
+  ylab("# of standard tRNAs") +
+  theme(legend.position = c(0.6, 0.1), legend.title = element_blank())
+rrna_vs_trna
+ggsave(here(output_dir, "rrna_vs_trna.png"), dpi = 600, width = 12, height = 7)
+
+cowplot::plot_grid(
+  rrnas_bar + coord_cartesian(xlim = c(0, 3)) + theme(axis.title.x = element_blank(), axis.text.x = element_blank()),
+  NULL,
+  rrna_vs_trna + coord_cartesian(xlim = c(0, 3), ylim = c(0, 20)),
+  trnas_bar + coord_cartesian(ylim = c(0, 20)) + theme(axis.title.y = element_blank(), axis.text.y = element_blank()),
+  ncol = 2,
+  nrow = 2,
+  rel_widths = c(1, 0.1),
+  rel_heights = c(0.1, 1)
+)
+ggsave(here(output_dir, "genome_rnas.png"), dpi = 600, width = 12, height = 7)
+ggsave(here(output_dir, "genome_rnas.svg"), dpi = 600, width = 12, height = 7)
+
+############
+### GUNC ###
+############
+gunc_legend <- genome_filtered %>%
+  group_by(GUNC_pass) %>%
+  summarise(
+    n = n(),
+    perc = n() / nrow(genome_filtered) * 100
+  ) %>%
+  mutate(
+    label = str_c(GUNC_pass, " (", n, " genomes; ", round(perc, 1), "%)", sep = ""),
+  )
+
+gunc_pass_fail <- genome_filtered %>%
+  ggplot(aes(completeness, contamination, fill = GUNC_pass)) +
+  geom_point(shape = 21) +
+  scale_fill_manual(
+    breaks = gunc_legend$GUNC_pass,
+    labels = gunc_legend$label,
+    values = c(colour_brewer$darkred, colour_brewer$blue)
+    ) +
+  xlab("Completeness (%)") +
+  ylab("Contamination (%)") +
+  theme(legend.position = c(0.1, 0.9), legend.title = element_blank())
+gunc_pass_fail
+ggsave(here(output_dir, "gunc_pass_fail.png"), dpi = 600, width = 12, height = 7)
+
+genome_filtered %>%
+  filter(!GUNC_pass) %>%
+  group_by(novelty) %>%
+  count()
+
+genome_filtered %>%
+  filter(!GUNC_pass) %>%
+  group_by(genome_quality) %>%
+  count()
+```
+
+```{r low-rep-taxa}
+novel_levels <- c("N/A", "Class novelty", "Order novelty", "Family novelty", "Genus novelty", "Species novelty", "Strain novelty")
+novel_colours <- c(colour_brewer$grey, RColorBrewer::brewer.pal(7, "Set1")[-1])
+
+target_levels <- c("N/A", "< 5", "5-10", "10-100", "> 100")
+target_colours <- c(colour_brewer$grey, colour_brewer$blue, colour_brewer$green, colour_brewer$orange, colour_brewer$red)
+
+sample_levels <- c("< 500", "500-1000", "1000-5000", "> 5000")
+sample_colours <- c(colour_brewer$blue, colour_brewer$green, colour_brewer$orange, colour_brewer$red)
+
+low_rep_plot <- low_rep_recovery %>%
+  replace_na(list(recovery = FALSE, novelty = "N/A")) %>%
+  mutate(
+    assembled = factor(assembled, levels = c(TRUE, FALSE), labels = c("Assembled", "Not chosen\n for assembly")),
+    recovery = factor(recovery, levels = c(TRUE, FALSE), labels = c("Genome\nrecovered", "No genome\nrecovery")),
+    novelty = factor(novelty, levels = c(str_c(novelty_levels, " novelty"), "Strain novelty", "N/A")),
+    target_sequences = case_when(
+      target_sequences < 0 ~ "N/A",
+      target_sequences < 5 ~ "< 5",
+      target_sequences <= 10 ~ "5-10",
+      target_sequences <= 100 ~ "10-100",
+      TRUE ~ "> 100"
+      ),
+    target_sequences = factor(target_sequences, levels = target_levels),
+    n_samples_chosen = n_samples_mean_coverage_gt_2,
+    n_samples = case_when(
+      n_samples_chosen < 500 ~ "< 500",
+      n_samples_chosen < 1000 ~ "500-1000",
+      n_samples_chosen < 5000 ~ "1000-5000",
+      TRUE ~ "> 5000"
+      ),
+    n_samples = factor(n_samples, levels = sample_levels)
+    )
+
+alluvial_layers <- list(
+  geom_stratum(reverse = FALSE),
+  geom_text(stat = "stratum", aes(label = after_stat(stratum)), reverse = FALSE),
+  scale_x_discrete(limits = c("Assembled?", "Recovered?", "Novelty"), expand = c(0, 0)),
+  scale_y_continuous(expand = c(0, 0)),
+  ylab("Phyla with low genome representation (<10)"),
+  theme(axis.title.x = element_blank(), axis.text.x = element_blank(), axis.ticks.x = element_blank())
+)
+
+low_rep_recovery_plot <- low_rep_plot %>%
+  count(assembled, recovery, novelty, target_sequences) %>%
+  arrange(desc(assembled), desc(recovery), novelty, target_sequences) %>%
+  ggplot(aes(
+    axis1 = assembled,
+    axis2 = recovery,
+    axis3 = novelty,
+    y = n,
+    )) +
+  geom_alluvium(aes(fill = novelty), alpha = 1, reverse = FALSE) +
+  alluvial_layers +
+  scale_fill_manual("Novelty", breaks = novel_levels, values = novel_colours)
+low_rep_recovery_plot
+ggsave(here(output_dir, "low_rep_recovery.png"), dpi = 600, width = 12, height = 7)
+ggsave(here(output_dir, "low_rep_recovery.svg"), dpi = 600, width = 12, height = 7)
+
+low_rep_plot %>%
+  count(assembled, recovery, novelty, n_samples) %>%
+  arrange(desc(assembled), desc(recovery), novelty, n_samples) %>%
+  ggplot(aes(
+    axis1 = assembled,
+    axis2 = recovery,
+    axis3 = novelty,
+    y = n,
+    )) +
+  geom_alluvium(aes(fill = n_samples), alpha = 1, reverse = FALSE) +
+  alluvial_layers +
+  scale_fill_manual("# of samples\nwith >2x coverage", breaks = sample_levels, values = sample_colours)
+ggsave(here(output_dir, "low_rep_recovery_samples.png"), dpi = 600, width = 12, height = 7)
+ggsave(here(output_dir, "low_rep_recovery_samples.svg"), dpi = 600, width = 12, height = 7)
+```
+
+```{r sample-comparison}
+genome_sources <- genome_filtered %>%
+  select(name, coassembly, binner, named_novelty, red_value, rep = `95ANI_representative`) %>%
+  left_join(coassemble_metadata %>% select(coassembly = name, style, samples, assembler)) %>%
+  separate_longer_delim(samples, ",") %>%
+  left_join(sample_metadata %>% select(samples = run, taxon_name, sci_name, parent_name, group, metagroup)) %>%
+  left_join(novel_species %>% select(name = genome) %>% mutate(novel = TRUE))
+
+prevalence_samples <- prevalence_filtered %>%
+  distinct(sample) %>%
+  mutate(run = sample, present = TRUE)
+
+taxon_suitable_counts <- sample_metadata %>%
+  filter(suitable, read_fraction >= 1) %>%
+  left_join(prevalence_samples) %>%
+  replace_na(list(present = FALSE)) %>%
+  group_by(group) %>%
+  summarise(samples = n(), present = sum(present)) %>%
+  mutate(
+    absent = samples - present,
+    present_perc = (present / samples * 100) %>% round(0) %>% as.character() %>% str_c("%"),
+    present_prop = present / samples,
+    absent_prop = 1 - present_prop
+    ) %>%
+  arrange(desc(samples)) %>%
+  filter(!is.na(group))
+
+genomes_per_sample <- genome_sources %>%
+  distinct(metagroup, group, rep) %>%
+  count(metagroup, group) %>%
+  full_join(taxon_suitable_counts) %>%
+  replace_na(list(n = 0)) %>%
+  mutate(genomes_per_sample = n / samples)
+
+novel_genomes_per_sample <- genome_sources %>%
+  filter(!is.na(novel), novel) %>%
+  distinct(metagroup, group, rep) %>%
+  count(metagroup, group) %>%
+  full_join(taxon_suitable_counts) %>%
+  replace_na(list(n = 0)) %>%
+  mutate(genomes_per_sample = n / samples)
+
+plot_biomes <- function(prefix = "") {
+  if (prefix == "novel") {
+    species <- "novel species"
+    prefix <- str_c(prefix, "_")
+    df <- novel_genomes_per_sample
+  } else {
+    species <- "species"
+    df <- genomes_per_sample
+  }
+
+  ###################
+  ### Main biomes ###
+  ###################
+  main_plot <- df %>%
+    group_by(metagroup, group) %>%
+    summarise(n = sum(n), samples = sum(samples)) %>%
+    ungroup() %>%
+    mutate(
+      group = factor(group),
+      group = fct_reorder(group, n, .desc = TRUE),
+      ) %>%
+    ggplot(aes(group, n, fill = metagroup)) +
+    geom_col() +
+    coord_flip() +
+    scale_fill_manual(
+      breaks = c("aquatic", "host", "terrestrial", "engineered"),
+      values = c(colour_brewer$blue, colour_brewer$orange, colour_brewer$green, colour_brewer$red)
+      ) +
+    scale_y_continuous(expand = expansion(mult = c(0, 0.05))) +
+    xlab("Biome") +
+    ylab(str_c("# of recovered ", species)) +
+    theme_cowplot(font_size = 7) +
+    theme(legend.position = c(0.7, 0.7))
+  print(main_plot)
+  ggsave(here(output_dir, str_c(prefix, "biome.png")), dpi = 600, width = 80, height = 45, units = "mm")
+  ggsave(here(output_dir, str_c(prefix, "biome.svg")), dpi = 600, width = 80, height = 45, units = "mm")
+
+  ###################
+  ### Rich biomes ###
+  ###################
+  df %>%
+    ggplot(aes(samples, n, colour = metagroup)) +
+    geom_point() +
+    geom_text_repel(aes(label = group), colour = "black", size = 5 / .pt) +
+    scale_x_log10() +
+    scale_colour_manual(
+      breaks = c("aquatic", "host", "terrestrial", "engineered"),
+      values = c(colour_brewer$blue, colour_brewer$orange, colour_brewer$green, colour_brewer$red)
+      ) +
+    xlab("# of samples in dataset") +
+    ylab(str_c("Recovered ", species)) +
+    theme_cowplot(font_size = 7) +
+    theme(legend.position = "none")
+  ggsave(here(output_dir, str_c(prefix, "rich_biomes.png")), dpi = 600, width = 80, height = 45, units = "mm")
+  ggsave(here(output_dir, str_c(prefix, "rich_biomes.svg")), dpi = 600, width = 80, height = 45, units = "mm")
+
+  biome_per_sample_plot <- df %>%
+    filter(samples > 10) %>%
+    ggplot(aes(samples, genomes_per_sample, colour = metagroup)) +
+    geom_point() +
+    geom_text_repel(aes(label = group), colour = "black", size = 5 / .pt, min.segment.length = 0.3) +
+    scale_x_log10() +
+    scale_colour_manual(
+      breaks = c("aquatic", "host", "terrestrial", "engineered"),
+      values = c(colour_brewer$blue, colour_brewer$orange, colour_brewer$green, colour_brewer$red)
+      ) +
+    xlab("# of samples in dataset") +
+    ylab(str_c("Recovered ", species, " per sample")) +
+    theme_cowplot(font_size = 7) +
+    theme(legend.position = "none")
+  ggsave(here(output_dir, str_c(prefix, "rich_biomes_per_sample.png")), dpi = 600, width = 80, height = 45, units = "mm")
+  ggsave(here(output_dir, str_c(prefix, "rich_biomes_per_sample.svg")), dpi = 600, width = 80, height = 45, units = "mm")
+
+  return(list(main_plot = main_plot, biome_per_sample_plot = biome_per_sample_plot))
+}
+
+biome_plots <- plot_biomes()
+novel_biome_plots <- plot_biomes(prefix = "novel")
+
+metagroup_genomes_per_sample <- novel_genomes_per_sample %>%
+  replace_na(list(metagroup = "host")) %>%
+  group_by(metagroup) %>%
+  summarise(n = sum(n), samples = sum(samples))
+
+metagroup_novel_biomes <- metagroup_genomes_per_sample %>%
+  mutate(
+    metagroup = factor(metagroup),
+    metagroup = fct_reorder(metagroup, n, .desc = TRUE),
+    ) %>%
+  ggplot(aes(metagroup, n, fill = metagroup)) +
+  geom_col() +
+  coord_flip() +
+  scale_fill_manual(
+    "Ecotype",
+    breaks = c("aquatic", "host", "terrestrial", "engineered"),
+    values = c(colour_brewer$blue, colour_brewer$orange, colour_brewer$green, colour_brewer$red)
+    ) +
+  scale_y_continuous(expand = expansion(mult = c(0, 0.05))) +
+  xlab("Biome") +
+  ylab(str_c("# of recovered novel species")) +
+  theme_cowplot(font_size = 7) +
+  theme(legend.position = "none")
+metagroup_novel_biomes
+ggsave(here(output_dir, "metagroup_novel_biomes.png"), dpi = 600, width = 80, height = 45, units = "mm")
+ggsave(here(output_dir, "metagroup_novel_biomes.svg"), dpi = 600, width = 80, height = 45, units = "mm")
+
+##############################
+### Novel species presence ###
+##############################
+novel_biome_presence <- taxon_suitable_counts %>%
+  left_join(manual_groupings %>% distinct(group, metagroup)) %>%
+  pivot_longer(c(present, absent), names_to = "presence", values_to = "count") %>%
+  mutate(
+    metagroup_presence = ifelse(presence == "absent", "absent", str_c(metagroup, presence, sep = "-")),
+    group = factor(group, levels = taxon_suitable_counts %>% arrange(desc(present)) %>% pull(group)),
+    ) %>%
+  ggplot(aes(group, count / 1000, fill = metagroup_presence)) +
+  geom_col() +
+  geom_text(aes(group, samples / 1000, label = present_perc), data = taxon_suitable_counts, hjust = 0, size = 2, inherit.aes = FALSE) +
+  coord_flip() +
+  scale_fill_manual(
+    breaks = c("aquatic-present", "host-present", "terrestrial-present", "engineered-present", "absent"),
+    values = c(colour_brewer$blue, colour_brewer$orange, colour_brewer$green, colour_brewer$red, colour_brewer$grey)
+    ) +
+  scale_y_break(
+    c(10, 35),
+    scales = 0.1,
+    ticklabels = c(36),
+    expand = expansion(mult = c(0, 0.05))
+    ) +
+  scale_y_break(
+    c(40, 67),
+    scales = 0.1,
+    ticklabels = c(68),
+    expand = expansion(mult = c(0, 0.05))
+    ) +
+  xlab("Biome") +
+  ylab("# of samples with novel species present (/1000)") +
+  theme_cowplot(font_size = 7) +
+  theme(legend.position = "none")
+novel_biome_presence
+ggsave(here(output_dir, "novel_biomes_presence.png"), dpi = 600, width = 90, height = 60, units = "mm")
+ggsave(here(output_dir, "novel_biomes_presence.svg"), dpi = 600, width = 90, height = 60, units = "mm")
+
+novel_biome_presence_prop <- taxon_suitable_counts %>%
+  left_join(manual_groupings %>% distinct(group, metagroup)) %>%
+  pivot_longer(c(present_prop, absent_prop), names_to = "presence", values_to = "prop") %>%
+  mutate(
+    metagroup_presence = ifelse(presence == "absent_prop", "absent", str_c(metagroup, presence, sep = "-")),
+    group = factor(group, levels = novel_genomes_per_sample %>% arrange(desc(n)) %>% pull(group)),
+    ) %>%
+  ggplot(aes(group, prop, fill = metagroup_presence)) +
+  geom_col() +
+  coord_flip() +
+  scale_fill_manual(
+    breaks = c("aquatic-present_prop", "host-present_prop", "terrestrial-present_prop", "engineered-present_prop", "absent"),
+    values = c(colour_brewer$blue, colour_brewer$orange, colour_brewer$green, colour_brewer$red, colour_brewer$grey)
+    ) +
+  scale_y_continuous(labels = scales::percent, limits = c(0, 1), expand = expansion(mult = c(0, 0))) +
+  xlab("Biome") +
+  ylab("Proportion of samples with novel species present") +
+  theme_cowplot(font_size = 7) +
+  theme(legend.position = "none")
+novel_biome_presence_prop
+ggsave(here(output_dir, "novel_biome_presence_prop.png"), dpi = 600, width = 90, height = 60, units = "mm")
+ggsave(here(output_dir, "novel_biome_presence_prop.svg"), dpi = 600, width = 90, height = 60, units = "mm")
+
+metagroup_biome_presence_prop <- taxon_suitable_counts %>%
+  left_join(manual_groupings %>% distinct(group, metagroup)) %>%
+  group_by(metagroup) %>%
+  summarise(present = sum(present), absent = sum(absent)) %>%
+  mutate(
+    present_prop = present / (present + absent),
+    absent_prop = absent / (present + absent),
+  ) %>%
+  pivot_longer(c(present_prop, absent_prop), names_to = "presence", values_to = "prop") %>%
+  mutate(
+    metagroup_presence = ifelse(presence == "absent_prop", "absent", str_c(metagroup, presence, sep = "-")),
+    metagroup = factor(metagroup, levels = metagroup_genomes_per_sample %>% arrange(desc(n)) %>% pull(metagroup)),
+    ) %>%
+  ggplot(aes(metagroup, prop, fill = metagroup_presence)) +
+  geom_col() +
+  coord_flip() +
+  scale_fill_manual(
+    breaks = c("aquatic-present_prop", "host-present_prop", "terrestrial-present_prop", "engineered-present_prop", "absent"),
+    values = c(colour_brewer$blue, colour_brewer$orange, colour_brewer$green, colour_brewer$red, colour_brewer$grey)
+    ) +
+  scale_y_continuous(labels = scales::percent, limits = c(0, 1), expand = expansion(mult = c(0, 0))) +
+  xlab("Biome") +
+  ylab("Proportion of samples with novel species present") +
+  theme_cowplot(font_size = 7) +
+  theme(legend.position = "none")
+metagroup_biome_presence_prop
+ggsave(here(output_dir, "metagroup_biome_presence_prop.png"), dpi = 600, width = 90, height = 60, units = "mm")
+ggsave(here(output_dir, "metagroup_biome_presence_prop.svg"), dpi = 600, width = 90, height = 60, units = "mm")
+
+###################
+### Host or not ###
+###################
+host_or_not_exclusive_counts <- sample_metadata %>%
+  filter(suitable, is.na(group), !is.na(host_or_not_pred)) %>%
+  left_join(prevalence_samples) %>%
+  replace_na(list(present = FALSE)) %>%
+  group_by(host_or_not_pred) %>%
+  summarise(samples = n(), present = sum(present)) %>%
+  mutate(
+    absent = samples - present,
+    host_or_not = ifelse(host_or_not_pred == "host", "host", "not_host")
+    ) %>%
+  arrange(desc(samples)) %>%
+  select(host_or_not, samples, present, absent)
+
+host_or_not_counts <- taxon_suitable_counts %>%
+  left_join(manual_groupings %>% distinct(group, metagroup, host_or_not)) %>%
+  bind_rows(host_or_not_exclusive_counts) %>%
+  group_by(host_or_not) %>%
+  summarise(
+    samples = sum(samples),
+    present = sum(present),
+    absent = sum(absent)
+    ) %>%
+  mutate(
+    present_perc = (present / samples * 100) %>% round(0) %>% as.character() %>% str_c("%"),
+    host_or_not = ifelse(host_or_not == "host", "host", "ecological")
+    )
+
+host_or_not_presence <- host_or_not_counts %>%
+  pivot_longer(c(present, absent), names_to = "presence", values_to = "count") %>%
+  mutate(
+    host_presence = ifelse(presence == "absent", "absent", str_c(host_or_not, presence, sep = "-")),
+    ) %>%
+  ggplot(aes(host_or_not, count, fill = host_presence)) +
+  geom_col() +
+  geom_text(aes(host_or_not, samples, label = present_perc), data = host_or_not_counts, hjust = 0, size = 2, inherit.aes = FALSE) +
+  coord_flip() +
+  scale_fill_manual(
+    breaks = c("host-present", "ecological-present", "absent"),
+    values = c(colour_brewer$orange, colour_brewer$green, colour_brewer$grey)
+    ) +
+  scale_y_continuous(
+    breaks = c(0, 25000, 75000, 125000),
+    expand = expansion(mult = c(0, 0.1))
+    ) +
+  ylab("# of samples") +
+  theme_cowplot(font_size = 7) +
+  theme(legend.position = "none", axis.title.y = element_blank())
+host_or_not_presence
+ggsave(here(output_dir, "host_or_not_presence.png"), dpi = 600, width = 40, height = 20, units = "mm")
+ggsave(here(output_dir, "host_or_not_presence.svg"), dpi = 600, width = 40, height = 20, units = "mm")
+
+##########################
+### Species assignment ###
+##########################
+novel_biome_species_prop <- sra_species_summary %>%
+  filter(!is.na(metagroup)) %>%
+  pivot_longer(c(spire_fraction, bc_improvement), names_to = "type", values_to = "fraction") %>%
+  mutate(
+    type = factor(type, levels = c("bc_improvement", "spire_fraction"), labels = c("With RBG", "Previous")),
+    group = factor(group, levels = novel_genomes_per_sample %>% arrange(desc(n)) %>% pull(group)),
+    ) %>%
+  ggplot(aes(group, fraction, fill = type)) +
+  geom_col() +
+  coord_flip() +
+  scale_fill_manual(
+    "Genome set",
+    breaks = c("Previous", "With RBG"),
+    values = c(colour_brewer$grey, colour_brewer$darkred)
+    ) +
+  scale_y_continuous(labels = scales::percent, limits = c(0, 1), expand = expansion(mult = c(0, 0))) +
+  xlab("") +
+  ylab("Known species fraction") +
+  theme_cowplot(font_size = 7)
+novel_biome_species_prop
+ggsave(here(output_dir, "novel_biome_species_prop.png"), dpi = 600, width = 90, height = 60, units = "mm")
+ggsave(here(output_dir, "novel_biome_species_prop.svg"), dpi = 600, width = 90, height = 60, units = "mm")
+
+novel_source_species_prop <- sra_species_summary %>%
+  filter(!is.na(metagroup)) %>%
+  pivot_longer(c(used_spire_fraction, used_bc_improvement), names_to = "type", values_to = "fraction") %>%
+  mutate(
+    type = factor(type, levels = c("used_bc_improvement", "used_spire_fraction"), labels = c("With RBG", "Previous")),
+    group = factor(group, levels = novel_genomes_per_sample %>% arrange(desc(n)) %>% pull(group)),
+    ) %>%
+  ggplot(aes(group, fraction, fill = type)) +
+  geom_col() +
+  coord_flip() +
+  scale_fill_manual(
+    "Genome set",
+    breaks = c("Previous", "With RBG"),
+    values = c(colour_brewer$grey, colour_brewer$darkred)
+    ) +
+  scale_y_continuous(labels = scales::percent, limits = c(0, 1), expand = expansion(mult = c(0, 0))) +
+  xlab("") +
+  ylab("Known species fraction") +
+  theme_cowplot(font_size = 7)
+novel_source_species_prop
+ggsave(here(output_dir, "novel_source_species_prop.png"), dpi = 600, width = 90, height = 60, units = "mm")
+ggsave(here(output_dir, "novel_source_species_prop.svg"), dpi = 600, width = 90, height = 60, units = "mm")
+
+novel_biome_species <- sra_species_summary %>%
+  filter(!is.na(metagroup)) %>%
+  # Food improvement is -0.0000328, but the line disappears due to limits
+  mutate(bc_improvement = ifelse(bc_improvement < 0, 0, bc_improvement)) %>%
+  pivot_longer(c(spire_fraction, bc_improvement, used_bc_improvement), names_to = "type", values_to = "fraction") %>%
+  mutate(type = factor(type, levels = c("spire_fraction", "bc_improvement", "used_bc_improvement"), labels = c("Previous", "With RBG", "Analysed samples"))) %>%
+  ggplot(aes(type, fraction, group = group, colour = metagroup)) +
+  geom_line() +
+  geom_point() +
+  scale_colour_manual(
+    breaks = c("aquatic", "host", "terrestrial", "engineered"),
+    values = c(colour_brewer$blue, colour_brewer$orange, colour_brewer$green, colour_brewer$red)
+    ) +
+  scale_y_continuous(labels = scales::percent, limits = c(0, 1)) +
+  xlab("") +
+  ylab("Known species fraction") +
+  theme_cowplot(font_size = 7) +
+  theme(legend.position = "none")
+novel_biome_species
+ggsave(here(output_dir, "novel_biome_species.png"), dpi = 600, width = 90, height = 60, units = "mm")
+ggsave(here(output_dir, "novel_biome_species.svg"), dpi = 600, width = 90, height = 60, units = "mm")
+
+####################################
+### Metagroup species assignment ###
+####################################
+metagroup_biome_species_prop <- metagroup_species_summary %>%
+  filter(!is.na(metagroup)) %>%
+  pivot_longer(c(spire_fraction, bc_improvement), names_to = "type", values_to = "fraction") %>%
+  mutate(
+    type = factor(type, levels = c("bc_improvement", "spire_fraction"), labels = c("With RBG", "Previous")),
+    metagroup = factor(metagroup, levels = metagroup_genomes_per_sample %>% arrange(desc(n)) %>% pull(metagroup)),
+    ) %>%
+  ggplot(aes(metagroup, fraction, fill = type)) +
+  geom_col() +
+  coord_flip() +
+  scale_fill_manual(
+    "Genome set",
+    breaks = c("Previous", "With RBG"),
+    values = c(colour_brewer$grey, colour_brewer$darkred)
+    ) +
+  scale_y_continuous(labels = scales::percent, limits = c(0, 1), expand = expansion(mult = c(0, 0))) +
+  xlab("") +
+  ylab("Known species fraction") +
+  theme_cowplot(font_size = 7)
+metagroup_biome_species_prop
+ggsave(here(output_dir, "metagroup_biome_species_prop.png"), dpi = 600, width = 90, height = 60, units = "mm")
+
+metagroup_source_species_prop <- metagroup_species_summary %>%
+  filter(!is.na(metagroup)) %>%
+  pivot_longer(c(used_spire_fraction, used_bc_improvement), names_to = "type", values_to = "fraction") %>%
+  mutate(
+    type = factor(type, levels = c("used_bc_improvement", "used_spire_fraction"), labels = c("With RBG", "Previous")),
+    metagroup = factor(metagroup, levels = metagroup_genomes_per_sample %>% arrange(desc(n)) %>% pull(metagroup)),
+    ) %>%
+  ggplot(aes(metagroup, fraction, fill = type)) +
+  geom_col() +
+  coord_flip() +
+  scale_fill_manual(
+    "Genome set",
+    breaks = c("Previous", "With RBG"),
+    values = c(colour_brewer$grey, colour_brewer$darkred)
+    ) +
+  scale_y_continuous(labels = scales::percent, limits = c(0, 1), expand = expansion(mult = c(0, 0))) +
+  xlab("") +
+  ylab("Known species fraction") +
+  theme_cowplot(font_size = 7)
+metagroup_source_species_prop
+ggsave(here(output_dir, "metagroup_source_species_prop.png"), dpi = 600, width = 90, height = 60, units = "mm")
+
+##############
+### Binner ###
+##############
+genome_sources %>%
+  distinct(binner, name) %>%
+  group_by(binner) %>%
+  count() %>%
+  mutate(binner = factor(binner, levels = c("metabat2", "metabat", "vamb", "semibin"), labels = c("MetaBAT2", "MetaBAT", "VAMB", "SemiBin2"))) %>%
+  filter(!is.na(binner)) %>%
+  ggplot(aes(binner, n)) +
+  geom_col() +
+  xlab("Binning tool") +
+  ylab("# of recovered genomes")
+ggsave(here(output_dir, "binner.png"), dpi = 600, width = 12, height = 7)
+
+genome_sources %>%
+  filter(novel) %>%
+  distinct(binner, rep) %>%
+  group_by(binner) %>%
+  count() %>%
+  mutate(binner = factor(binner, levels = c("metabat2", "vamb", "semibin", "metabat"), labels = c("MetaBAT2", "VAMB", "SemiBin2", "MetaBAT"))) %>%
+  filter(!is.na(binner)) %>%
+  ggplot(aes(binner, n)) +
+  geom_col() +
+  xlab("Binning tool") +
+  ylab("# of recovered novel species")
+ggsave(here(output_dir, "binner_species.png"), dpi = 600, width = 12, height = 7)
+```
+
+```{r pd-plotting}
+plot_pg_table <- function(df, filename) {
+  pg_table <- df %>%
+    mutate(PG_perc_plot = PG_perc) %>%
+    select(domain, clade, taxa_out, taxa_in, PG_perc, PG_perc_plot) %>%
+    gt(groupname_col = "domain") %>%
+    gt_plt_bar_pct(column = PG_perc_plot, scaled = TRUE, fill = colour_brewer$darkblue, background = colour_brewer$blue) %>%
+    fmt_percent(columns = c(PG_perc), decimals = 1, scale_values = FALSE) %>%
+    cols_label(
+      clade = "Clade",
+      taxa_out = "GTDB r214",
+      taxa_in = "Ibis",
+      PG_perc = "PG",
+      PG_perc_plot = ""
+      )
+
+  gtsave(pg_table, here(output_dir, str_c(filename, ".html")))
+  webshot::webshot(url = here(output_dir, str_c(filename, ".html")), file = here(output_dir, str_c(filename, ".png")))
+}
+
+bind_rows(
+    pd_clade %>% filter(str_detect(clade, "^d__")),
+    pd_clade %>%
+      filter(str_detect(clade, "^[p]__")) %>%
+      group_by(domain) %>%
+      slice_max(PG_perc, n = 10) %>%
+      mutate(clade = str_remove(clade, "; .*")) %>%
+      arrange(domain, desc(PG_perc))
+    ) %>%
+  arrange(domain) %>%
+  plot_pg_table(filename = "pg_sort_table")
+
+bind_rows(
+    pd_clade %>% filter(str_detect(clade, "^d__")),
+    pd_clade %>%
+      filter(str_detect(clade, "^[p]__"), taxa >= 10) %>%
+      group_by(domain) %>%
+      slice_max(PG_perc, n = 10) %>%
+      mutate(clade = str_remove(clade, "; .*")) %>%
+      arrange(domain, desc(PG_perc))
+    ) %>%
+  arrange(domain) %>%
+  plot_pg_table(filename = "pg_sort_common_table")
+
+bind_rows(
+    pd_clade %>% filter(str_detect(clade, "^d__")),
+    pd_clade %>%
+      filter(str_detect(clade, "^[p]__"), taxa >= 10) %>%
+      group_by(domain) %>%
+      slice_max(PD_in, n = 10) %>%
+      mutate(clade = str_remove(clade, "; .*")) %>%
+      arrange(domain, desc(PG_perc))
+    ) %>%
+  arrange(domain) %>%
+  plot_pg_table(filename = "pd_sort_table")
+
+bind_rows(
+    pd_clade %>% filter(str_detect(clade, "^d__")),
+    pd_clade %>%
+      filter(str_detect(clade, "^[p]__"), taxa >= 10) %>%
+      group_by(domain) %>%
+      slice_max(taxa_in, n = 10) %>%
+      mutate(clade = str_remove(clade, "; .*")) %>%
+      arrange(domain, desc(PG_perc))
+    ) %>%
+  arrange(domain) %>%
+  plot_pg_table(filename = "taxa_sort_table")
+```
+
+```{r gunc-passing}
+gunc_passing <- genome_filtered %>%
+  group_by(novelty, GUNC_pass) %>%
+  count() %>%
+  pivot_wider(names_from = GUNC_pass, values_from = n, values_fill = 0) %>%
+  mutate(
+    prop = 100 * `TRUE` / (`TRUE` + `FALSE`),
+    total = `TRUE` + `FALSE`
+    )
+
+gunc_total <- gunc_passing %>%
+  mutate(novelty = factor(novelty, levels = novelty_levels)) %>%
+  ggplot(aes(novelty, total)) +
+  geom_col() +
+  ylab("# genomes") +
+  theme(
+    axis.title.x = element_blank(),
+    axis.text.x = element_blank(),
+    )
+
+gunc_prop <- gunc_passing %>%
+  mutate(novelty = factor(novelty, levels = novelty_levels)) %>%
+  ggplot(aes(novelty, prop)) +
+  geom_point() +
+  xlab("Genome novelty (against GTDB r214)") +
+  ylab("Proportion passing GUNC (%)")
+
+cowplot::plot_grid(
+  gunc_total,
+  gunc_prop,
+  ncol = 1,
+  rel_heights = c(1, 1)
+)
+ggsave(here(output_dir, "gunc_passing.png"), dpi = 600, width = 12, height = 7)
+```
+
+```{r prevalence}
+prevalence_legend <- prev_summary %>%
+  mutate(genome_rarity = factor(genome_rarity, levels = prevalence_levels)) %>%
+  group_by(genome_rarity) %>%
+  summarise(
+    n = n(),
+    perc = n() / nrow(prev_summary) * 100
+  ) %>%
+  mutate(
+    label = str_c(genome_rarity, " (", n, " species; ", round(perc, 1), "%)", sep = ""),
+  )
+
+##########################
+### Individual metrics ###
+##########################
+bar_layers <- list(
+  scale_fill_manual(
+    breaks = prevalence_legend$genome_rarity,
+    labels = prevalence_legend$label,
+    values = prevalence_colours
+    ),
+  theme(legend.position = "none")
+)
+
+prevalence_bar <- prev_summary %>%
+  ggplot(aes(prevalence, fill = genome_rarity)) +
+  bar_layers +
+  geom_histogram(aes(y = after_stat(100 * count / sum(count))), binwidth = 0.3) +
+  scale_x_log10() +
+  scale_y_continuous(breaks = c(0, 20), labels = scales::label_percent(scale = 1)) +
+  xlab("Prevalence (# of samples)") +
+  ylab("")
+prevalence_bar
+ggsave(here(output_dir, "prevalence_bar.png"), dpi = 600, width = 12, height = 7)
+
+abundance_bar <- prev_summary %>%
+  ggplot(aes(y = abundance, fill = genome_rarity)) +
+  bar_layers +
+  geom_histogram(aes(x = after_stat(100 * count / sum(count))), binwidth = 0.25) +
+  scale_y_log10(labels = scales::percent) +
+  scale_x_continuous(breaks = c(0, 20), labels = scales::label_percent(scale = 1)) +
+  xlab("") +
+  ylab("Trimmed mean abundance (%)")
+abundance_bar
+ggsave(here(output_dir, "abundance_bar.png"), dpi = 600, width = 12, height = 7)
+
+###############################
+### Prevalence vs abundance ###
+###############################
+prevalence_vs_abundance <- prev_summary %>%
+  ggplot(aes(prevalence, abundance, fill = genome_rarity)) +
+  # geom_point(shape = 21) +
+  geom_jitter(shape = 21, height = 0, width = 0.1, size = 1) +
+  scale_y_log10(limits = c(0.00004, 1), labels = scales::percent, breaks = c(0.001, 0.01, 0.05, 0.10, 0.25, 0.50, 0.75, 1)) +
+  scale_x_log10() +
+  scale_fill_manual(
+    breaks = prevalence_legend$genome_rarity,
+    labels = prevalence_legend$label,
+    values = prevalence_colours
+    ) +
+  xlab("Prevalence (# of samples)") +
+  ylab("Trimmed mean abundance (%)") +
+  theme(legend.position = c(0.6, 0.9), legend.title = element_blank())
+prevalence_vs_abundance
+ggsave(here(output_dir, "prevalence_vs_abundance.png"), dpi = 600, width = 12, height = 7)
+
+taxon_prevalence_vs_abundance <- prev_summary %>%
+  ggplot(aes(taxon_prevalence, abundance, fill = genome_rarity)) +
+  # geom_point(shape = 21) +
+  geom_jitter(shape = 21, height = 0, width = 0.1) +
+  scale_y_log10(limits = c(0.00004, 1), labels = scales::percent, breaks = c(0.001, 0.01, 0.05, 0.10, 0.25, 0.50, 0.75, 1)) +
+  scale_x_log10() +
+  scale_fill_manual(
+    breaks = prevalence_legend$genome_rarity,
+    labels = prevalence_legend$label,
+    values = prevalence_colours
+    ) +
+  xlab("Prevalence (# of sample biomes)") +
+  ylab("Trimmed mean abundance (%)") +
+  theme(legend.position = c(0.6, 0.9), legend.title = element_blank())
+taxon_prevalence_vs_abundance
+ggsave(here(output_dir, "taxon_prevalence_vs_abundance.png"), dpi = 600, width = 12, height = 7)
+
+left_panel <- cowplot::plot_grid(
+  prevalence_bar + coord_cartesian(xlim = c(1, 1900)) + theme(axis.title.x = element_blank(), axis.text.x = element_blank()),
+  prevalence_vs_abundance + coord_cartesian(xlim = c(1, 1900), ylim = c(0.00004, 0.81)),
+  ncol = 1,
+  rel_heights = c(0.1, 1),
+  align = "v"
+)
+right_panel <- cowplot::plot_grid(
+  NULL,
+  abundance_bar + coord_cartesian(ylim = c(0.00004, 0.81)) + theme(axis.title.y = element_blank(), axis.text.y = element_blank()),
+  ncol = 1,
+  rel_heights = c(0.1, 1)
+)
+genome_distribution_plot <- cowplot::plot_grid(
+  left_panel,
+  right_panel,
+  ncol = 2,
+  rel_widths = c(1, 0.1)
+)
+genome_distribution_plot
+ggsave(here(output_dir, "genome_distribution.png"), dpi = 600, width = 12, height = 7)
+ggsave(here(output_dir, "genome_distribution.svg"), dpi = 600, width = 12, height = 7)
+
+################################
+### Max vs Average abundance ###
+################################
+max_vs_average <- prev_summary %>%
+  ggplot(aes(max_abund, abundance, fill = genome_rarity)) +
+  geom_abline(intercept = 0, slope = 1) +
+  geom_point(shape = 21) +
+  scale_y_log10(limits = c(0.00004, 1), labels = scales::percent, breaks = c(0.001, 0.01, 0.05, 0.10, 0.25, 0.50, 0.75, 1)) +
+  scale_x_log10(limits = c(0.00004, 1), labels = scales::percent, breaks = c(0.001, 0.01, 0.05, 0.10, 0.25, 0.50, 0.75, 1)) +
+  scale_fill_manual(
+    breaks = prevalence_legend$genome_rarity,
+    labels = prevalence_legend$label,
+    values = prevalence_colours
+    ) +
+  xlab("Max abundance (%)") +
+  ylab("Trimmed mean abundance (%)") +
+  theme(legend.position = c(0.1, 0.9), legend.title = element_blank())
+max_vs_average
+ggsave(here(output_dir, "max_vs_average.png"), dpi = 600, width = 12, height = 7)
+
+source_vs_average <- prev_summary %>%
+  ggplot(aes(max_source_abund, abundance, fill = genome_rarity)) +
+  geom_abline(intercept = 0, slope = 1) +
+  geom_point(shape = 21) +
+  scale_y_log10(limits = c(0.00004, 1), labels = scales::percent, breaks = c(0.001, 0.01, 0.05, 0.10, 0.25, 0.50, 0.75, 1)) +
+  scale_x_log10(limits = c(0.00004, 1), labels = scales::percent, breaks = c(0.001, 0.01, 0.05, 0.10, 0.25, 0.50, 0.75, 1)) +
+  scale_fill_manual(
+    breaks = prevalence_legend$genome_rarity,
+    labels = prevalence_legend$label,
+    values = prevalence_colours
+    ) +
+  xlab("Max source abundance (%)") +
+  ylab("Trimmed mean abundance (%)") +
+  theme(legend.position = c(0.1, 0.9), legend.title = element_blank())
+source_vs_average
+ggsave(here(output_dir, "source_vs_average.png"), dpi = 600, width = 12, height = 7)
+
+#########################################
+### Max coverage vs Average abundance ###
+#########################################
+maxcov_vs_average <- prev_summary %>%
+  ggplot(aes(max_coverage, abundance, fill = genome_rarity)) +
+  geom_point(shape = 21) +
+  scale_x_log10(limits = c(0.4, 15000)) +
+  scale_y_log10(limits = c(0.00004, 1), labels = scales::percent, breaks = c(0.001, 0.01, 0.05, 0.10, 0.25, 0.50, 0.75, 1)) +
+  scale_fill_manual(
+    breaks = prevalence_legend$genome_rarity,
+    labels = prevalence_legend$label,
+    values = prevalence_colours
+    ) +
+  xlab("Max coverage") +
+  ylab("Trimmed mean abundance (%)") +
+  theme(legend.position = c(0.1, 0.9), legend.title = element_blank())
+maxcov_vs_average
+ggsave(here(output_dir, "maxcov_vs_average.png"), dpi = 600, width = 12, height = 7)
+
+sourcecov_vs_average <- prev_summary %>%
+  ggplot(aes(max_source_coverage, abundance, fill = genome_rarity)) +
+  geom_point(shape = 21) +
+  scale_x_log10(limits = c(0.4, 15000)) +
+  scale_y_log10(limits = c(0.00004, 1), labels = scales::percent, breaks = c(0.001, 0.01, 0.05, 0.10, 0.25, 0.50, 0.75, 1)) +
+  scale_fill_manual(
+    breaks = prevalence_legend$genome_rarity,
+    labels = prevalence_legend$label,
+    values = prevalence_colours
+    ) +
+  xlab("Max source coverage") +
+  ylab("Trimmed mean abundance (%)") +
+  theme(legend.position = c(0.1, 0.9), legend.title = element_blank())
+sourcecov_vs_average
+ggsave(here(output_dir, "sourcecov_vs_average.png"), dpi = 600, width = 12, height = 7)
+
+sourcecovsum_vs_average <- prev_summary %>%
+  ggplot(aes(sum_source_coverage, abundance, fill = genome_rarity)) +
+  geom_point(shape = 21) +
+  scale_x_log10(limits = c(0.4, 17000)) +
+  scale_y_log10(limits = c(0.00004, 1), labels = scales::percent, breaks = c(0.001, 0.01, 0.05, 0.10, 0.25, 0.50, 0.75, 1)) +
+  scale_fill_manual(
+    breaks = prevalence_legend$genome_rarity,
+    labels = prevalence_legend$label,
+    values = prevalence_colours
+    ) +
+  xlab("Summed source coverage") +
+  ylab("Trimmed mean abundance (%)") +
+  theme(legend.position = c(0.1, 0.9), legend.title = element_blank())
+sourcecovsum_vs_average
+ggsave(here(output_dir, "sourcecovsum_vs_average.png"), dpi = 600, width = 12, height = 7)
+```
+
+```{r phyla-prevalence}
+prevalence_levels <- c(
+  "Strictly abundant",
+  "Conditionally abundant",
+  "Strictly moderate",
+  "Rare and abundant",
+  "Conditionally rare",
+  "Strictly rare"
+)
+prevalence_colours <- c(
+  "#c51b7d",
+  "#e9a3c9",
+  "#fde0ef",
+  "#e6f5d0",
+  "#a1d76a",
+  "#4d9221"
+)
+
+rarity_cutoff <- 0.1
+abundant_cutoff <- 1
+summary_phyla <- phyla_prevalence %>%
+  group_by(phyla) %>%
+  summarise(
+    mean_abundance = mean(rel_abund_perc) / 100,
+    abundance = mean(rel_abund_perc, trim = 0.1) / 100,
+    prevalence = n(),
+    q10 = quantile(rel_abund_perc, 0.1) / 100,
+    median_abund = median(rel_abund_perc) / 100,
+    q90 = quantile(rel_abund_perc, 0.9) / 100,
+    max_abund = max(rel_abund_perc) / 100,
+    max_coverage = max(coverage),
+    all_abundant = all(rel_abund_perc >= abundant_cutoff),
+    all_rare = all(rel_abund_perc < rarity_cutoff),
+    none_abundant = all(rel_abund_perc < abundant_cutoff),
+    none_rare = all(rel_abund_perc >= rarity_cutoff),
+    taxon_prevalence = length(unique(taxon_name)),
+    ) %>%
+  mutate(
+    phyla_rarity = case_when(
+      all_abundant ~ "Strictly abundant",
+      all_rare ~ "Strictly rare",
+      none_abundant & none_rare ~ "Strictly moderate",
+      none_abundant ~ "Conditionally rare",
+      none_rare ~ "Conditionally abundant",
+      TRUE ~ "Rare and abundant", # Conditionally rare and abundant
+      ),
+    )
+
+phyla_legend <- summary_phyla %>%
+  mutate(phyla_rarity = factor(phyla_rarity, levels = prevalence_levels)) %>%
+  group_by(phyla_rarity) %>%
+  summarise(
+    n = n(),
+    perc = n() / nrow(summary_phyla) * 100
+  ) %>%
+  mutate(
+    label = str_c(phyla_rarity, " (", n, " species; ", round(perc, 1), "%)", sep = ""),
+  )
+
+##########################
+### Individual metrics ###
+##########################
+bar_layers <- list(
+  scale_fill_manual(
+    breaks = phyla_legend$phyla_rarity,
+    labels = phyla_legend$label,
+    values = prevalence_colours
+    ),
+  theme(legend.position = "none")
+)
+
+phyla_prevalence_bar <- summary_phyla %>%
+  ggplot(aes(prevalence, fill = phyla_rarity)) +
+  bar_layers +
+  geom_histogram(aes(y = after_stat(100 * count / sum(count))), binwidth = 0.5) +
+  scale_x_log10() +
+  xlab("Prevalence (# of samples)") +
+  ylab("")
+
+phyla_abundance_bar <- summary_phyla %>%
+  ggplot(aes(y = abundance, fill = phyla_rarity)) +
+  bar_layers +
+  geom_histogram(aes(x = after_stat(100 * count / sum(count))), binwidth = 0.25) +
+  scale_y_log10(labels = scales::percent) +
+  xlab("") +
+  ylab("Trimmed mean abundance (%)")
+
+###############################
+### Prevalence vs abundance ###
+###############################
+phyla_prevalence_vs_abundance <- summary_phyla %>%
+  ggplot(aes(prevalence, abundance, fill = phyla_rarity)) +
+  # geom_point(shape = 21) +
+  geom_jitter(shape = 21, height = 0, width = 0.1) +
+  scale_y_log10(limits = c(0.00004, 1), labels = scales::percent, breaks = c(0.001, 0.01, 0.05, 0.10, 0.25, 0.50, 0.75, 1)) +
+  scale_x_log10() +
+  scale_fill_manual(
+    breaks = phyla_legend$phyla_rarity,
+    labels = phyla_legend$label,
+    values = prevalence_colours
+    ) +
+  xlab("Prevalence (# of samples)") +
+  ylab("Trimmed mean abundance (%)") +
+  theme(legend.position = c(0.6, 0.9), legend.title = element_blank())
+
+left_panel <- cowplot::plot_grid(
+  phyla_prevalence_bar + coord_cartesian(xlim = c(1, 1900)) + theme(axis.title.x = element_blank(), axis.text.x = element_blank()),
+  phyla_prevalence_vs_abundance + coord_cartesian(xlim = c(1, 1900), ylim = c(0.00004, 0.81)),
+  ncol = 1,
+  rel_heights = c(0.1, 1),
+  align = "v"
+)
+right_panel <- cowplot::plot_grid(
+  NULL,
+  phyla_abundance_bar + coord_cartesian(ylim = c(0.00004, 0.81)) + theme(axis.title.y = element_blank(), axis.text.y = element_blank()),
+  ncol = 1,
+  rel_heights = c(0.1, 1)
+)
+cowplot::plot_grid(
+  left_panel,
+  right_panel,
+  ncol = 2,
+  rel_widths = c(1, 0.1)
+)
+ggsave(here(output_dir, "phyla_distribution.png"), dpi = 600, width = 12, height = 7)
+ggsave(here(output_dir, "phyla_distribution.svg"), dpi = 600, width = 12, height = 7)
+```
+
+```{r accumulation-curves}
+rarefied_genomes %>%
+  mutate(
+    taxon = factor(taxon, levels = str_to_lower(novelty_levels[-7])),
+    domain = factor(domain, levels = c("d__Bacteria", "d__Archaea"), labels = c("Bacteria", "Archaea"))
+    ) %>%
+  ggplot(aes(step, unique, colour = domain)) +
+  geom_line(aes(group = domain), linetype = "dashed", colour = "black", data = . %>% filter(first | last)) +
+  geom_line() +
+  geom_text(aes(label = domain), data = . %>% filter(last), nudge_x = 1e2, hjust = "left") +
+  facet_wrap(~ taxon, scales = "free") +
+  scale_x_continuous("# of rarefied genomes", labels = scales::comma, expand = expansion(mult = c(0, .3))) +
+  scale_y_continuous("# of novel clades", labels = scales::comma) +
+  scale_colour_brewer(breaks = c("Bacteria", "Archaea"), palette = "Set1") +
+  theme(legend.position = "none")
+ggsave("accumulation_curves.png", path = output_dir, height = 7, width = 12)
+ggsave("accumulation_curves.svg", path = output_dir, height = 7, width = 12)
+
+rarefied_genomes_coassembly %>%
+  mutate(
+    taxon = factor(taxon, levels = str_to_lower(novelty_levels[-7])),
+    domain = factor(domain, levels = c("d__Bacteria", "d__Archaea"), labels = c("Bacteria", "Archaea"))
+    ) %>%
+  ggplot(aes(step, unique, colour = domain)) +
+  geom_line(aes(group = domain), linetype = "dashed", colour = "black", data = . %>% filter(first | last)) +
+  geom_line() +
+  geom_text(aes(label = domain), data = . %>% filter(last), nudge_x = 1e1, hjust = "left") +
+  facet_wrap(~ taxon, scales = "free") +
+  scale_x_continuous("# of rarefied coassemblies", labels = scales::comma, expand = expansion(mult = c(0, .25))) +
+  scale_y_continuous("# of novel clades", labels = scales::comma) +
+  scale_colour_brewer(breaks = c("Bacteria", "Archaea"), palette = "Set1") +
+  theme(legend.position = "none")
+ggsave("accumulation_coassembly_curves.png", path = output_dir, height = 7, width = 12)
+ggsave("accumulation_coassembly_curves.svg", path = output_dir, height = 7, width = 12)
+
+species_rarefied_coassembly <- rarefied_genomes_coassembly %>%
+  filter(taxon == "species") %>%
+  mutate(
+    taxon = factor(taxon, levels = str_to_lower(novelty_levels[-7])),
+    domain = factor(domain, levels = c("d__Bacteria", "d__Archaea"), labels = c("Bacteria", "Archaea"))
+    ) %>%
+  ggplot(aes(step, unique, colour = domain)) +
+  geom_line(aes(group = domain), linetype = "dashed", colour = "black", data = . %>% filter(first | last)) +
+  geom_line() +
+  geom_text(aes(label = domain), data = . %>% filter(last), nudge_x = 1e1, hjust = "left", size = 2) +
+  scale_x_continuous("# of rarefied coassemblies", labels = scales::comma, expand = expansion(mult = c(0, .25))) +
+  scale_y_continuous("# of novel species", labels = scales::comma) +
+  scale_colour_brewer(breaks = c("Bacteria", "Archaea"), palette = "Set1") +
+  theme(legend.position = "none")
+
+order_rarefied_coassembly <- rarefied_genomes_coassembly %>%
+  filter(taxon == "order") %>%
+  mutate(
+    taxon = factor(taxon, levels = str_to_lower(novelty_levels[-7])),
+    domain = factor(domain, levels = c("d__Bacteria", "d__Archaea"), labels = c("Bacteria", "Archaea"))
+    ) %>%
+  ggplot(aes(step, unique, colour = domain)) +
+  geom_line(aes(group = domain), linetype = "dashed", colour = "black", data = . %>% filter(first | last)) +
+  geom_line() +
+  geom_text(aes(label = domain), data = . %>% filter(last), nudge_x = 1e1, hjust = "left", size = 2) +
+  scale_x_continuous("# of rarefied coassemblies", labels = scales::comma, expand = expansion(mult = c(0, .25))) +
+  scale_y_continuous("# of novel orders", labels = scales::comma) +
+  scale_colour_brewer(breaks = c("Bacteria", "Archaea"), palette = "Set1") +
+  theme(legend.position = "none")
+
+phyla_rarefied_coassembly <- rarefied_genomes_coassembly %>%
+  filter(taxon == "phylum", domain == "d__Bacteria") %>%
+  mutate(
+    taxon = factor(taxon, levels = str_to_lower(novelty_levels[-7])),
+    domain = factor(domain, levels = c("d__Bacteria", "d__Archaea"), labels = c("Bacteria", "Archaea"))
+    ) %>%
+  ggplot(aes(step, unique, colour = domain)) +
+  geom_line(aes(group = domain), linetype = "dashed", colour = "black", data = . %>% filter(first | last)) +
+  geom_line() +
+  geom_text(aes(label = domain), data = . %>% filter(last), nudge_x = 1e1, hjust = "left", size = 2) +
+  scale_x_continuous("# of rarefied coassemblies", labels = scales::comma, expand = expansion(mult = c(0, .25))) +
+  scale_y_continuous("# of novel phyla", labels = scales::comma) +
+  scale_colour_brewer(breaks = c("Bacteria", "Archaea"), palette = "Set1") +
+  theme(legend.position = "none")
+```
+
+```{r prev-and-abund}
+left_panel <- cowplot::plot_grid(
+  prevalence_bar +
+    theme_cowplot(font_size = 7) +
+    coord_cartesian(xlim = c(1, 1900)) +
+    theme(
+      axis.title.x = element_blank(), axis.text.x = element_blank(),
+      legend.position = "none",
+      ),
+  prevalence_vs_abundance +
+    theme_cowplot(font_size = 7) +
+    coord_cartesian(xlim = c(1, 1900), ylim = c(0.00004, 0.81)) +
+    theme(
+      legend.position = c(0.3, 0.8), #"none",
+      ),
+  ncol = 1,
+  rel_heights = c(0.1, 1),
+  align = "v"
+)
+right_panel <- cowplot::plot_grid(
+  NULL,
+  abundance_bar +
+    theme_cowplot(font_size = 7) +
+    coord_cartesian(ylim = c(0.00004, 0.81)) +
+    theme(
+      axis.title.y = element_blank(), axis.text.y = element_blank(),
+      legend.position = "none",
+      ),
+  ncol = 1,
+  rel_heights = c(0.1, 1)
+)
+genome_distribution_plot <- cowplot::plot_grid(
+  left_panel,
+  right_panel,
+  ncol = 2,
+  rel_widths = c(1, 0.1)
+)
+
+genome_distribution_legend <- get_legend(
+  prevalence_vs_abundance +
+    theme_cowplot(font_size = 3) +
+    theme(legend.position = "right")
+  )
+
+top_row <- cowplot::plot_grid(
+  novel_biome_plots$main_plot + theme_cowplot(font_size = 7) + theme(legend.position = c(0.6, 0.8)),
+  novel_biome_presence_prop + xlab("") + ylab("Samples with novel species") + theme(axis.text.y = element_blank()),
+  novel_biome_species_prop + theme(axis.text.y = element_blank(), legend.position = c(0.6, 0.5)),
+  novel_source_species_prop + theme(axis.text.y = element_blank(), legend.position = "none"),
+  nrow = 1,
+  rel_widths = c(2, 1, 1, 1),
+  labels = "auto", label_size = 10
+)
+bottom_row <- cowplot::plot_grid(
+  novel_biome_plots$biome_per_sample_plot + theme_cowplot(font_size = 7) + theme(legend.position = "none"),
+  genome_distribution_plot,
+  nrow = 1,
+  rel_widths = c(2, 3),
+  labels = c("e", "f"), label_size = 10
+)
+cowplot::plot_grid(
+  top_row,
+  bottom_row,
+  ncol = 1
+)
+ggsave(here(output_dir, "prev_and_abund.png"), dpi = 600, width = 180, height = 120, units = "mm")
+ggsave(here(output_dir, "prev_and_abund.svg"), dpi = 600, width = 180, height = 120, units = "mm")
+
+top_row <- cowplot::plot_grid(
+  metagroup_novel_biomes + xlab("Ecotype") + theme_cowplot(font_size = 7) + theme(legend.position = "none"),
+  metagroup_biome_presence_prop + xlab("") + ylab("Samples with novel species") + theme(axis.text.y = element_blank()),
+  metagroup_biome_species_prop + theme(axis.text.y = element_blank(), legend.position = c(0.6, 0.4)),
+  metagroup_source_species_prop + theme(axis.text.y = element_blank(), legend.position = "none"),
+  nrow = 1,
+  rel_widths = c(2, 1, 1, 1),
+  labels = "auto", label_size = 10
+)
+ggsave(here(output_dir, "metagroups.png"), dpi = 600, width = 180, height = 60, units = "mm")
+```
+
+```{r evaluate}
+#######################
+### Target-specific ###
+#######################
+evaluation %>%
+  filter(source_coverage_trun > 10, is_target) %>%
+  ggplot(aes(source_coverage_trun, fill = is_recovered)) +
+  geom_histogram(breaks = 10^seq(1, 2, by = 0.05)) +
+  scale_x_log10("Summed source coverage") +
+  scale_fill_brewer("Targets recovered", palette = "Dark2") +
+  theme_cowplot() +
+  theme(legend.position = c(0.7, 0.7))
+ggsave(here(output_dir, "targets.png"), dpi = 600, height = 7, width = 12)
+
+eval_table <- evaluation %>%
+  filter(source_coverage_trun > 10, is_target) %>%
+  mutate(
+    source_coverage = cut(
+      source_coverage_trun,
+      breaks = c(0, 10, 11, 12, 13, 14, 15, 17, 20, 30, 40, 50, 1000),
+      labels = c(
+        "0-10", "10-11", "11-12", "12-13", "13-14", "14-15", "15-16",
+        "17-20", "20-30", "30-40", "40-50", ">50"
+        )
+      )
+    ) %>%
+  group_by(source_coverage) %>%
+  summarise(
+    n = n(),
+    recovered = sum(is_recovered),
+    prop = recovered / n
+    ) %>%
+  gt() %>%
+  cols_label(
+    source_coverage = "Summed source coverage",
+    n = "Total",
+    recovered = "Recovered",
+    prop = "Recovered (%)"
+    ) %>%
+  fmt_percent(columns = c(prop), decimals = 1) %>%
+  fmt_integer(columns = c(n, recovered)) %>%
+  tab_header(
+    title = "Recovery of target sequences by source coverage"
+  )
+
+gtsave(eval_table, here(output_dir, "targets_table.html"))
+webshot::webshot(url = here(output_dir, "targets_table.html"), file = here(output_dir, "targets_table.png"), selector = "table")
+
+##############################
+### All relevant sequences ###
+##############################
+evaluation %>%
+  filter(is_complete) %>%
+  ggplot(aes(source_coverage_trun, fill = is_recovered)) +
+  geom_histogram(breaks = seq(0, 21, by = 2)) +
+  geom_vline(xintercept = 10, linetype = "dashed") +
+  scale_x_continuous("Summed source coverage", breaks = seq(0, 20, by = 2), labels = c(seq(0, 18, by = 2), ">20")) +
+  scale_y_continuous("Count", label = scales::comma) +
+  scale_fill_brewer("Sequences recovered", palette = "Dark2") +
+  theme_cowplot() +
+  theme(legend.position = c(0.6, 0.7))
+ggsave(here(output_dir, "target_sequences.png"), dpi = 600, height = 7, width = 12)
+
+evaluation %>%
+  filter(is_complete) %>%
+  group_by(target_cutoff, is_recovered) %>%
+  count() %>%
+  mutate(is_recovered = ifelse(is_recovered, "Recovered", "Unrecovered")) %>%
+  pivot_wider(names_from = is_recovered, values_from = n) %>%
+  mutate(prop = Recovered / (Recovered + Unrecovered))
+
+######################################
+### Unrecovered with high coverage ###
+######################################
+evaluation %>%
+  filter(is_complete, !is_recovered, source_coverage > 50) %>%
+  separate(taxonomy, into = c("root", "domain", "phylum", "class", "order", "family", "genus", "species"), sep = "; ") %>%
+  select(
+    coassembly,
+    domain, phylum, class, order, family, genus, species,
+    gene, sequence, source_samples, source_num_hits, source_coverage,
+    ) %>%
+  arrange(coassembly, domain, phylum, class, order, family, genus, species)
+```
+
+```{r proteins}
+protein_accum <- protein_rarefy %>%
+  filter(rarefy != "bc") %>%
+  mutate(rarefy = factor(rarefy, levels = c("all", "nonbc"), labels = c("All genomes", "All w/o binchicken"))) %>%
+  ggplot(aes(step, unique, colour = rarefy)) +
+  geom_line(aes(group = rarefy), linetype = "dashed", colour = "black", data = . %>% filter(first | last)) +
+  geom_line() +
+  geom_text(aes(label = rarefy), data = . %>% filter(last), nudge_x = 1e2, hjust = "left", size = 5) +
+  scale_x_continuous("# of rarefied species", labels = scales::comma, expand = expansion(mult = c(0, .3))) +
+  scale_y_continuous("Unique protein clusters", labels = scales::comma, expand = expansion(mult = c(0, 0.05))) +
+  scale_colour_brewer(palette = "Set1") +
+  theme_cowplot() +
+  theme(legend.position = "none")
+protein_accum
+ggsave("protein_accumulation.png", path = output_dir, dpi = 600, height = 7, width = 12)
+
+protein_accum_bc <- protein_rarefy %>%
+  filter(rarefy == "bc") %>%
+  ggplot(aes(step, unique)) +
+  geom_line(linetype = "dashed", colour = "black", data = . %>% filter(first | last)) +
+  geom_line() +
+  scale_x_continuous("# of rarefied species", labels = scales::comma, expand = expansion(mult = c(0, 0.05))) +
+  scale_y_continuous("Novel protein clusters", labels = scales::comma, expand = expansion(mult = c(0, 0.05))) +
+  theme_cowplot()
+protein_accum_bc
+ggsave("protein_accumulation_bc.png", path = output_dir, dpi = 600, height = 7, width = 12)
+
+####################
+### Venn diagram ###
+####################
+protein_prop_labels <- protein_props %>%
+  mutate(
+    label = str_c(
+      ifelse(GTDB, "GTDB", ""),
+      ifelse(`SPIRE+`, "SPIRE+", ""),
+      ifelse(binchicken, "binchicken", "")
+      ),
+    range = map(count_mil, seq_len)
+    ) %>%
+  unnest(range) %>%
+  mutate(label = str_c(label, range))
+protein_prop_lists <- list(
+  GTDB = protein_prop_labels %>% filter(GTDB) %>% pull(label),
+  SPIRE_and = protein_prop_labels %>% filter(`SPIRE+`) %>% pull(label),
+  binchicken = protein_prop_labels %>% filter(binchicken) %>% pull(label)
+)
+protein_venn <- ggVennDiagram(
+    protein_prop_lists,
+    label_alpha = 0,
+    set_size = 3,
+    label_size = 3
+    ) +
+  labs(subtitle = "Protein clusters (x1M)") +
+  theme(legend.position = "none")
+ggsave("protein_venn.png", path = output_dir, dpi = 600, height = 7, width = 12)
+
+###################
+### Unannotated ###
+###################
+proteins_unannotated <- genome_unannotated %>%
+  filter(maggroup != "UHGG") %>%
+  mutate(annotation_status = factor(
+      annotation_status,
+      levels = c("unannotated", "domain_only", "annotated"),
+      labels = c("Unannotated", "Domain only", "Annotated")
+      )
+    ) %>%
+  group_by(maggroup, annotation_status) %>%
+  summarise(mean = mean(count)) %>%
+  mutate(
+    prop = mean / sum(mean),
+    ) %>%
+  ggplot(aes(maggroup, prop, fill = annotation_status)) +
+  geom_col() +
+  coord_flip() +
+  scale_fill_brewer(palette = "Dark2") +
+  scale_y_continuous("Proportion of unannotated proteins", labels = scales::percent, expand = expansion(mult = c(0, 0))) +
+  theme_cowplot()
+proteins_unannotated
+ggsave("proteins_unannotated.png", path = output_dir, dpi = 600, height = 7, width = 12)
+
+############
+### TEAs ###
+############
+genome_teas_evidence <- genome_teas %>%
+  group_by(maggroup, genome) %>%
+  summarise(
+    evidence = case_when(
+      any(evidence == "full") ~ "full",
+      any(evidence == "single_gene") ~ "single_gene",
+      all(is.na(evidence)) ~ "unknown",
+      TRUE ~ "partial"
+      )
+    ) %>%
+  group_by(maggroup, evidence) %>%
+  count() %>%
+  group_by(maggroup) %>%
+  mutate(
+    prop = 100 * n / sum(n),
+    evidence = factor(evidence, levels = c("full", "single_gene", "partial", "unknown"))
+    )
+genome_teas_evidence %>%
+  ggplot(aes(maggroup, prop, fill = evidence)) +
+  geom_col() +
+  coord_flip() +
+  scale_fill_brewer(palette = "Dark2") +
+  scale_y_continuous("TEA evidence", labels = scales::percent, expand = expansion(mult = c(0, 0))) +
+  theme_cowplot()
+ggsave("proteins_teas_evidence.png", path = output_dir, dpi = 600, height = 7, width = 12)
+
+genome_teas_pathways <- genome_teas_selected %>%
+  group_by(magset, maggroup, tea_group) %>%
+  count() %>%
+  group_by(magset, maggroup) %>%
+  mutate(
+    prop = n / sum(n),
+    tea_group = factor(tea_group, levels = c("Aerobic", "Iron", "Nitrate", "Nitrite", "Sulfate", "Sulfite", "Methanogenesis", "Selenate", "Fermentation", "MHC", "Unknown"))
+    )
+
+proteins_teas_pathways_plot <- genome_teas_pathways %>%
+  group_by(magset, tea_group) %>%
+  summarise(n = sum(n)) %>%
+  group_by(magset) %>%
+  mutate(prop = n / sum(n)) %>%
+  ungroup() %>%
+  filter(magset != "UHGG") %>%
+  ggplot(aes(magset, prop, fill = tea_group)) +
+  geom_col() +
+  coord_flip() +
+  scale_fill_manual(values = c("#8dd3c7", "#ffffb3", "#bebada", "#fb8072", "#80b1d3", "#fdb462", "#b3de69", "#fccde5", "#d9d9d9", "#ccebc5", "#bc80bd")) +
+  scale_y_continuous("Proportion of novel species", labels = scales::percent, expand = expansion(mult = c(0, 0))) +
+  theme_cowplot() +
+  theme(axis.title.y = element_blank())
+proteins_teas_pathways_plot
+ggsave("proteins_teas_pathways.png", path = output_dir, dpi = 600, height = 7, width = 12)
+
+genome_teas_stats <- genome_teas_pathways %>%
+  filter(maggroup %in% c(genome_unannotated$genome_rarity %>% levels(), "Undetected")) %>%
+  mutate(
+    negative = round(n / prop) - n
+    ) %>%
+  group_by(tea_group) %>%
+  nest() %>%
+  mutate(
+    base_model = map(data, ~ glm(cbind(n, negative) ~ 1, family = binomial(link = logit), data = .)),
+    model = map(data, ~ glm(cbind(n, negative) ~ maggroup, family = binomial(link = logit), data = .)),
+    anova = map2(base_model, model, anova, test = "LRT"),
+    tidy_anova = map(anova, broom::tidy),
+    pval = map_dbl(tidy_anova, ~ .x$p.value[[2]]),
+    adj_pval = p.adjust(pval, method = "BH"),
+    stars = signif_stars(adj_pval),
+    label = str_c(stars, tea_group, sep = " "),
+    max_fold_change = map_dbl(data, ~ max(.x$prop) / min(.x$prop)),
+    max_change = map_dbl(data, ~ max(.x$prop) - min(.x$prop)),
+    maggroup = case_when(
+      tea_group == "Aerobic" ~ "Undetected",
+      tea_group == "Nitrate" ~ "Conditionally abundant",
+      tea_group == "Nitrite" ~ "Strictly rare",
+      tea_group == "Sulfate" ~ "Rare and abundant",
+      tea_group == "Fermentation" ~ "Rare and abundant",
+      tea_group == "Unknown" ~ "Undetected"
+      ),
+    prop = case_when(
+      tea_group == "Aerobic" ~ 0.354,
+      tea_group == "Nitrate" ~ 0.114,
+      tea_group == "Nitrite" ~ 0.0979,
+      tea_group == "Sulfate" ~ 0.0520,
+      tea_group == "Fermentation" ~ 0.164,
+      tea_group == "Unknown" ~ 0.112,
+      ),
+    ) %>%
+  filter(adj_pval < 0.05)
+
+proteins_teas_pathways_lines <- genome_teas_pathways %>%
+  filter(maggroup %in% c(genome_unannotated$genome_rarity %>% levels(), "Undetected")) %>%
+  ggplot(aes(maggroup, prop, colour = tea_group, group = tea_group)) +
+  geom_line() +
+  geom_point() +
+  geom_text(aes(label = label), data = genome_teas_stats, nudge_y = 0.03, size = 5 / .pt) +
+  scale_colour_manual(values = c("#8dd3c7", "#ffffb3", "#bebada", "#fb8072", "#80b1d3", "#fdb462", "#b3de69", "#fccde5", "#d9d9d9", "#ccebc5", "#bc80bd"), drop = FALSE) +
+  scale_y_continuous("Proportion of novel species", labels = scales::percent, expand = expansion(mult = c(0, 0))) +
+  theme_cowplot() +
+  theme(
+    axis.title.x = element_blank(),
+    axis.text.x = element_text(angle = 45, hjust = 1)
+    )
+proteins_teas_pathways_lines
+ggsave("proteins_teas_pathways_lines.png", path = output_dir, dpi = 600, height = 7, width = 12)
+```
+
+```{r proteins-together}
+rarefy_stats <- bind_rows(
+  protein_rarefy %>%
+    filter(rarefy == "bc") %>%
+    mutate(domain = "", taxon = "") %>%
+    select(step, unique, rarefy, domain, taxon),
+) %>%
+  group_by(rarefy, taxon, domain) %>%
+  nest() %>%
+  mutate(
+    lm = map(data, ~ lm(unique ~ step, data = .)),
+    slope = map_dbl(lm, ~ coef(.)[2]),
+    label = case_when(
+      !is.na(rarefy) ~ str_c(round(slope, 0), " / species"),
+      taxon == "species" & domain == "Bacteria" ~ str_c(round(slope, 0), " / coassembly"),
+      taxon == "species" & domain == "Archaea" ~ str_c(round(slope, 0), " / coassembly"),
+      taxon == "order" & domain == "Bacteria" ~ str_c(""),
+      taxon == "order" & domain == "Archaea" ~ str_c(""),
+      taxon == "phylum" & domain == "Bacteria" ~ str_c(""),
+      ),
+    step = case_when(
+      !is.na(rarefy) ~ 1e4,
+      taxon == "species" & domain == "Bacteria" ~ 250,
+      taxon == "species" & domain == "Archaea" ~ 500,
+      taxon == "order" & domain == "Bacteria" ~ 1e3,
+      taxon == "order" & domain == "Archaea" ~ 1e3,
+      taxon == "phylum" & domain == "Bacteria" ~ 1e3,
+      ),
+    unique = case_when(
+      !is.na(rarefy) ~ 1.5e7,
+      taxon == "species" & domain == "Bacteria" ~ 15e3,
+      taxon == "species" & domain == "Archaea" ~ 5e3,
+      taxon == "order" & domain == "Bacteria" ~ 1e3,
+      taxon == "order" & domain == "Archaea" ~ 1e3,
+      taxon == "phylum" & domain == "Bacteria" ~ 1e3,
+      ),
+  )
+
+cowplot::plot_grid(
+  protein_venn,
+  NULL,
+  protein_accum_bc +
+    geom_text(aes(label = label), data = rarefy_stats %>% filter(!is.na(rarefy)), size = 5 / .pt) +
+    scale_y_continuous("Novel proteins", labels = scales::label_number(scale_cut = scales::cut_short_scale())) +
+    theme_cowplot(font_size = 7),
+  NULL,
+  nrow = 2,
+  rel_widths = c(1, 1.5),
+  labels = "auto", label_size = 10,
+  align = "h", axis = "lrtb"
+)
+
+ggsave("proteins.png", path = output_dir, dpi = 600, width = 180, height = 120, units = "mm")
+ggsave("proteins.svg", path = output_dir, dpi = 600, width = 180, height = 120, units = "mm")
+```

@@ -1,0 +1,131 @@
+samples	taxon_name	sci_name	parent_name	superparent_name
+ERR1193293	metagenome	riverine metagenome	ecological metagenomes	metagenomes
+ERR1193294	metagenome	riverine metagenome	ecological metagenomes	metagenomes
+ERR1352915	metagenome	activated sludge metagenome	ecological metagenomes	metagenomes
+ERR1527276	metagenome	groundwater metagenome	ecological metagenomes	metagenomes
+ERR1527280	metagenome	groundwater metagenome	ecological metagenomes	metagenomes
+ERR1527285	metagenome	groundwater metagenome	ecological metagenomes	metagenomes
+ERR1527286	metagenome	groundwater metagenome	ecological metagenomes	metagenomes
+ERR1995156	metagenome	plastic metagenome	ecological metagenomes	metagenomes
+ERR1995157	metagenome	plastic metagenome	ecological metagenomes	metagenomes
+ERR1995158	metagenome	plastic metagenome	ecological metagenomes	metagenomes
+ERR2094175	metagenome	aquaculture metagenome	ecological metagenomes	metagenomes
+ERR2281800	metagenome	groundwater metagenome	ecological metagenomes	metagenomes
+ERR2281801	metagenome	groundwater metagenome	ecological metagenomes	metagenomes
+ERR2281802	metagenome	groundwater metagenome	ecological metagenomes	metagenomes
+ERR2281803	metagenome	groundwater metagenome	ecological metagenomes	metagenomes
+ERR2345104	metagenome	freshwater metagenome	ecological metagenomes	metagenomes
+ERR2346693	metagenome	freshwater metagenome	ecological metagenomes	metagenomes
+ERR2564001	metagenome	marine sediment metagenome	ecological metagenomes	metagenomes
+ERR2564002	metagenome	marine sediment metagenome	ecological metagenomes	metagenomes
+ERR2564004	metagenome	marine sediment metagenome	ecological metagenomes	metagenomes
+ERR2586215	metagenome	sludge metagenome	ecological metagenomes	metagenomes
+ERR2586216	metagenome	sludge metagenome	ecological metagenomes	metagenomes
+ERR2586217	metagenome	sludge metagenome	ecological metagenomes	metagenomes
+ERR3094287	metagenome	groundwater metagenome	ecological metagenomes	metagenomes
+ERR3094290	metagenome	groundwater metagenome	ecological metagenomes	metagenomes
+ERR3094291	metagenome	groundwater metagenome	ecological metagenomes	metagenomes
+ERR3094292	metagenome	groundwater metagenome	ecological metagenomes	metagenomes
+ERR3094293	metagenome	groundwater metagenome	ecological metagenomes	metagenomes
+ERR3094294	metagenome	groundwater metagenome	ecological metagenomes	metagenomes
+ERR3094295	metagenome	groundwater metagenome	ecological metagenomes	metagenomes
+ERR3094296	metagenome	groundwater metagenome	ecological metagenomes	metagenomes
+ERR3094302	metagenome	groundwater metagenome	ecological metagenomes	metagenomes
+ERR3420974	metagenome	aquaculture metagenome	ecological metagenomes	metagenomes
+ERR3428543	metagenome	aquaculture metagenome	ecological metagenomes	metagenomes
+ERR3428546	metagenome	aquaculture metagenome	ecological metagenomes	metagenomes
+ERR3428547	metagenome	aquaculture metagenome	ecological metagenomes	metagenomes
+ERR3454363	metagenome	activated sludge metagenome	ecological metagenomes	metagenomes
+ERR3478687	metagenome	aquifer metagenome	ecological metagenomes	metagenomes
+ERR3839023	metagenome	electrolysis cell metagenome	ecological metagenomes	metagenomes
+ERR3839025	metagenome	electrolysis cell metagenome	ecological metagenomes	metagenomes
+ERR3839026	metagenome	electrolysis cell metagenome	ecological metagenomes	metagenomes
+ERR3987232	metagenome	plastic metagenome	ecological metagenomes	metagenomes
+ERR3987276	metagenome	plastic metagenome	ecological metagenomes	metagenomes
+ERR4405439	metagenome	riverine metagenome	ecological metagenomes	metagenomes
+ERR4405440	metagenome	riverine metagenome	ecological metagenomes	metagenomes
+ERR4519278	metagenome	anaerobic digester metagenome	ecological metagenomes	metagenomes
+ERR4519286	metagenome	anaerobic digester metagenome	ecological metagenomes	metagenomes
+ERR4534291	metagenome	anaerobic digester metagenome	ecological metagenomes	metagenomes
+ERR4539292	metagenome	anaerobic digester metagenome	ecological metagenomes	metagenomes
+ERR4539293	metagenome	anaerobic digester metagenome	ecological metagenomes	metagenomes
+ERR4549758	metagenome	anaerobic digester metagenome	ecological metagenomes	metagenomes
+ERR4583368	metagenome	fish gut metagenome	organismal metagenomes	metagenomes
+ERR4583369	metagenome	fish gut metagenome	organismal metagenomes	metagenomes
+ERR4583371	metagenome	fish gut metagenome	organismal metagenomes	metagenomes
+ERR4583372	metagenome	fish gut metagenome	organismal metagenomes	metagenomes
+ERR4844149	metagenome	fish gut metagenome	organismal metagenomes	metagenomes
+ERR4844150	metagenome	fish gut metagenome	organismal metagenomes	metagenomes
+ERR4844152	metagenome	fish gut metagenome	organismal metagenomes	metagenomes
+ERR4844153	metagenome	fish gut metagenome	organismal metagenomes	metagenomes
+ERR4844154	metagenome	fish gut metagenome	organismal metagenomes	metagenomes
+ERR4844161	metagenome	fish gut metagenome	organismal metagenomes	metagenomes
+ERR4904390	metagenome	aquifer metagenome	ecological metagenomes	metagenomes
+ERR4904391	metagenome	aquifer metagenome	ecological metagenomes	metagenomes
+ERR4904392	metagenome	aquifer metagenome	ecological metagenomes	metagenomes
+ERR4904393	metagenome	aquifer metagenome	ecological metagenomes	metagenomes
+ERR5295732	metagenome	industrial waste metagenome	ecological metagenomes	metagenomes
+ERR5295859	metagenome	industrial waste metagenome	ecological metagenomes	metagenomes
+ERR5322706	metagenome	industrial waste metagenome	ecological metagenomes	metagenomes
+ERR5325469	metagenome	industrial waste metagenome	ecological metagenomes	metagenomes
+ERR6222542	metagenome	anaerobic digester metagenome	ecological metagenomes	metagenomes
+SRR10148553	metagenome	beaver gut metagenome	organismal metagenomes	metagenomes
+SRR10148554	metagenome	beaver gut metagenome	organismal metagenomes	metagenomes
+SRR10812145	metagenome	anaerobic digester metagenome	ecological metagenomes	metagenomes
+SRR10812146	metagenome	anaerobic digester metagenome	ecological metagenomes	metagenomes
+SRR10812147	metagenome	anaerobic digester metagenome	ecological metagenomes	metagenomes
+SRR10812148	metagenome	anaerobic digester metagenome	ecological metagenomes	metagenomes
+SRR11802610	metagenome	biofilm metagenome	ecological metagenomes	metagenomes
+SRR11802611	metagenome	biofilm metagenome	ecological metagenomes	metagenomes
+SRR11802613	metagenome	plant metagenome	organismal metagenomes	metagenomes
+SRR12021142	metagenome	bovine metagenome	organismal metagenomes	metagenomes
+SRR12021149	metagenome	bovine metagenome	organismal metagenomes	metagenomes
+SRR12404947	metagenome	wastewater metagenome	ecological metagenomes	metagenomes
+SRR12404962	metagenome	wastewater metagenome	ecological metagenomes	metagenomes
+SRR13236726	metagenome	bioreactor sludge metagenome	ecological metagenomes	metagenomes
+SRR13236869	metagenome	bioreactor sludge metagenome	ecological metagenomes	metagenomes
+SRR13608702	metagenome	riverine metagenome	ecological metagenomes	metagenomes
+SRR13608705	metagenome	riverine metagenome	ecological metagenomes	metagenomes
+SRR13782123	metagenome	marine metagenome	ecological metagenomes	metagenomes
+SRR13782130	metagenome	marine metagenome	ecological metagenomes	metagenomes
+SRR14803403	metagenome	hydrothermal vent metagenome	ecological metagenomes	metagenomes
+SRR15237799	metagenome	wastewater metagenome	ecological metagenomes	metagenomes
+SRR15237804	metagenome	wastewater metagenome	ecological metagenomes	metagenomes
+SRR15237806	metagenome	wastewater metagenome	ecological metagenomes	metagenomes
+SRR15237810	metagenome	wastewater metagenome	ecological metagenomes	metagenomes
+SRR15237811	metagenome	wastewater metagenome	ecological metagenomes	metagenomes
+SRR15237813	metagenome	wastewater metagenome	ecological metagenomes	metagenomes
+SRR15425350	metagenome	microbial mat metagenome	ecological metagenomes	metagenomes
+SRR15425351	metagenome	microbial mat metagenome	ecological metagenomes	metagenomes
+SRR15425352	metagenome	microbial mat metagenome	ecological metagenomes	metagenomes
+SRR15425353	metagenome	microbial mat metagenome	ecological metagenomes	metagenomes
+SRR16797977	metagenome	compost metagenome	ecological metagenomes	metagenomes
+SRR16797981	metagenome	compost metagenome	ecological metagenomes	metagenomes
+SRR16798008	metagenome	compost metagenome	ecological metagenomes	metagenomes
+SRR16798009	metagenome	compost metagenome	ecological metagenomes	metagenomes
+SRR446575	metagenome	aquifer metagenome	ecological metagenomes	metagenomes
+SRR446576	metagenome	aquifer metagenome	ecological metagenomes	metagenomes
+SRR7450245	metagenome	rock metagenome	ecological metagenomes	metagenomes
+SRR7473445	metagenome	hot springs metagenome	ecological metagenomes	metagenomes
+SRR8816318	metagenome	saltern metagenome	ecological metagenomes	metagenomes
+SRR8816319	metagenome	saltern metagenome	ecological metagenomes	metagenomes
+ERR1299384	metagenome	marine sediment metagenome	ecological metagenomes	metagenomes
+ERR2191545	metagenome	aquifer metagenome	ecological metagenomes	metagenomes
+ERR688342	metagenome	estuary metagenome	ecological metagenomes	metagenomes
+ERR7336232	metagenome	bioreactor metagenome	ecological metagenomes	metagenomes
+ERR7337728	metagenome	bioreactor metagenome	ecological metagenomes	metagenomes
+ERR7338890	metagenome	bioreactor metagenome	ecological metagenomes	metagenomes
+SRR13608709	metagenome	freshwater metagenome	ecological metagenomes	metagenomes
+ERR1879295	metagenome	biofilm metagenome	ecological metagenomes	metagenomes
+ERR1879297	metagenome	biofilm metagenome	ecological metagenomes	metagenomes
+SRR15237800	metagenome	wastewater metagenome	ecological metagenomes	metagenomes
+SRR15237809	metagenome	wastewater metagenome	ecological metagenomes	metagenomes
+SRR15237815	metagenome	wastewater metagenome	ecological metagenomes	metagenomes
+SRR15237816	metagenome	wastewater metagenome	ecological metagenomes	metagenomes
+SRR12389347	metagenome	marine metagenome	ecological metagenomes	metagenomes
+SRR13782122	metagenome	marine metagenome	ecological metagenomes	metagenomes
+SRR13782124	metagenome	marine metagenome	ecological metagenomes	metagenomes
+SRR13782132	metagenome	marine metagenome	ecological metagenomes	metagenomes
+SRR13782133	metagenome	marine metagenome	ecological metagenomes	metagenomes
+SRR13782134	metagenome	marine metagenome	ecological metagenomes	metagenomes
+SRR13782135	metagenome	marine metagenome	ecological metagenomes	metagenomes

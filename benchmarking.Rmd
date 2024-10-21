@@ -1,0 +1,505 @@
+---
+title: "Benchmarking"
+author: "Samuel Aroney"
+date: "`r format(Sys.time(), '%d %B %Y')`"
+output:
+  bookdown::pdf_document2:
+    toc: FALSE
+  bookdown::html_document2: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, message = FALSE, warning = FALSE, error = FALSE, fig.width = 6, fig.asp = 0.618, out.width = "100%", fig.align = "center")
+
+library(ggsignif)
+library(ggExtra)
+library(gt)
+library(gtExtras)
+library(webshot)
+library(cowplot)
+library(tidyverse)
+library(here)
+
+output_dir <- here("results", "benchmarking_Rmd")
+dir.create(output_dir, recursive = TRUE)
+
+theme_set(theme_cowplot(font_family = "Arial"))
+
+colour_brewer <- setNames(append(as.list(RColorBrewer::brewer.pal(12, "Paired")), c("#737373", "#FFFFFF", "#000000")), c("blue", "darkblue", "green", "darkgreen", "red", "darkred", "orange", "darkorange", "purple", "darkpurple", "yellow", "brown", "grey", "white", "black"))
+
+signif_stars <- function(pval, ns = "NS") {
+  case_when(
+    pval < 0.001 ~ "***",
+    pval < 0.01 ~ "**",
+    pval < 0.05 ~ "*",
+    TRUE ~ ns
+  )
+}
+
+mean_sd <- function(x) {
+  return(c(y = mean(x), ymin = mean(x) - sd(x), ymax = mean(x) + sd(x)))
+}
+```
+
+```{r wrangling}
+single_samples <- read_tsv(here("data", "benchmarking", "single_samples.tsv"))
+coassemble_metadata <- read_tsv(here("binchicken_RBGs", "metadata", "coassembly_metadata.tsv")) %>%
+  inner_join(single_samples %>% select(name = coassembly))
+
+combined_clusters <- read_tsv(here("binchicken_RBGs", "metadata", "benchmarking_clusters.tsv"), col_names = c("representative", "genome")) %>%
+  mutate(
+    representative = representative %>% str_remove(".*/") %>% str_remove(".fna"),
+    genome = genome %>% str_remove(".*/") %>% str_remove(".fna"),
+  )
+combined_gunc <- bind_rows(
+    read_tsv(here("binchicken_RBGs", "metadata", "benchmarking_gunc.tsv")),
+    read_tsv(here("binchicken_RBGs", "metadata", "gunc.tsv")),
+  ) %>%
+  mutate(name = str_remove(genome, "\\.fna"))
+genome_metadata <- bind_rows(
+    read_tsv(here("binchicken_RBGs", "metadata", "genome_metadata.tsv")) %>%
+      inner_join(single_samples %>% select(coassembly)) %>%
+      mutate(genome_set = "coassembly", subset = NA_character_) %>%
+      select(genome_set, coassembly, subset, name, binner,
+        genome_size, contigs_total, contig_N50, contig_max, gc, coding_density, translation_table,
+        completeness, contamination, CheckM_model, CheckM_version, taxonomy),
+    read_tsv(here("binchicken_RBGs", "metadata", "benchmarking_genome_metadata.tsv")) %>%
+      select(genome_set, coassembly, subset, name, binner,
+        genome_size, contigs_total, contig_N50, contig_max, gc, coding_density, translation_table,
+        completeness, contamination, CheckM_model, CheckM_version, taxonomy)
+    ) %>%
+  mutate(
+    quality = completeness - 5 * contamination,
+    unmapped = !str_detect(coassembly, "binchicken_co"),
+    ) %>%
+  filter(quality >= 50) %>%
+  left_join(combined_clusters, by = c("name" = "genome")) %>%
+  left_join(combined_gunc %>% select(name, pass.GUNC))
+
+across_representatives <- genome_metadata %>%
+  distinct(representative, coassembly, genome_set) %>%
+  group_by(representative, coassembly) %>%
+  summarise(across = n() > 1)
+
+assembly_runtime <- read_tsv(here("data", "benchmarking", "assembly_stats.tsv"))
+
+contig_lengths <- read_tsv(here("binchicken_RBGs", "metadata", "benchmarking_contig_lengths.tsv")) %>%
+  select(Contig = record, genome = fasta, contig_length)
+
+# read_tsv(here("results", "mapping_stats.tsv"), col_names = c("file")) %>%
+#   mutate(
+#     data = map(file, ~
+#       read_tsv(.x) %>%
+#         pivot_longer(-Contig, names_to = "metric") %>%
+#         separate(metric, into = c("sample", "metric"), sep = " ", extra = "merge") %>%
+#         mutate(genome = str_extract(.x, "[^/]+(?=\\.tsv$)")) %>%
+#         left_join(contig_lengths)
+#       ),
+#   ) %>%
+#   unnest(data) %>%
+#   select(genome, contig = Contig, sample, metric, value, contig_length) %>%
+#   write_tsv(here("binchicken_RBGs", "metadata", "benchmarking_mapping_processed.tsv"))
+
+mapping <- read_tsv(here("binchicken_RBGs", "metadata", "benchmarking_mapping_processed.tsv")) %>%
+  group_by(metric, genome, contig) %>%
+  summarise(
+    value = max(value),
+    contig_length = first(contig_length)
+    ) %>%
+  group_by(metric, genome) %>%
+  summarise(
+    value = sum(value * contig_length) / sum(contig_length)
+    ) %>%
+  pivot_wider(names_from = metric, values_from = value) %>%
+  rename(covered_fraction = `Covered Fraction`, trimmed_mean_coverage = `Trimmed Mean`)
+
+
+genome_set_levels <- c("single", "coassembly", "both")
+genome_set_labels <- c("Single     \nonly   ", "Coassembly\nonly", "     Both")
+genome_set_values <- c(colour_brewer$blue, colour_brewer$red, colour_brewer$purple)
+
+assembly_set_levels <- c("single", "coassembly")
+assembly_set_labels <- c("Single     ", "   Coassembly")
+assembly_set_values <- c(colour_brewer$purple, colour_brewer$purple)
+
+genome_across <- genome_metadata %>%
+  left_join(across_representatives) %>%
+  mutate(
+    assembly_set = genome_set,
+    assembly_set = factor(assembly_set, levels = assembly_set_levels),
+    genome_set = ifelse(across, "both", genome_set),
+    genome_set = factor(genome_set, levels = genome_set_levels),
+    ) %>%
+  left_join(mapping, by = c("name" = "genome")) %>%
+  filter(!is.na(covered_fraction))
+
+binchicken_vs_sourmash <- bind_rows(
+  read_tsv(here("data", "benchmarking", "sourmash_targets.tsv")) %>%
+    mutate(clusterer = "sourmash"),
+  read_tsv(here("data", "benchmarking", "binchicken_targets.tsv")) %>%
+    filter(length == 2) %>%
+    select(samples, targets = total_targets) %>%
+    mutate(clusterer = "binchicken")
+  )
+
+binchicken_vs_sourmash_5 <- bind_rows(
+  read_tsv(here("data", "benchmarking", "sourmash_targets_5.tsv")) %>%
+    mutate(clusterer = "sourmash"),
+  read_tsv(here("data", "benchmarking", "binchicken_targets_5.tsv")) %>%
+    mutate(clusterer = "binchicken")
+  )
+```
+
+```{r single-vs-coassembly}
+co_stats <- bind_rows(
+  # Species counts
+  genome_across %>%
+    filter(genome_set != "both") %>%
+    distinct(genome_set, coassembly, representative) %>%
+    group_by(genome_set, coassembly) %>%
+    count() %>%
+    mutate(group = "species") %>%
+    group_by(group) %>%
+    nest(),
+  # Genome quality
+  genome_across %>%
+    filter(genome_set == "both") %>%
+    group_by(assembly_set, coassembly, representative) %>%
+    summarise(n = max(quality)) %>%
+    rename(genome_set = assembly_set) %>%
+    mutate(group = "quality_both") %>%
+    group_by(group) %>%
+    nest(),
+  # Genome completeness
+  genome_across %>%
+    filter(genome_set == "both") %>%
+    group_by(assembly_set, coassembly, representative) %>%
+    summarise(n = max(completeness)) %>%
+    rename(genome_set = assembly_set) %>%
+    mutate(group = "completeness_both") %>%
+    group_by(group) %>%
+    nest(),
+  # Genome contamination
+  genome_across %>%
+    filter(genome_set == "both") %>%
+    group_by(assembly_set, coassembly, representative) %>%
+    summarise(n = min(contamination)) %>%
+    rename(genome_set = assembly_set) %>%
+    mutate(group = "contamination_both") %>%
+    group_by(group) %>%
+    nest(),
+  # Contig chimerism (max CoverM covered fraction)
+  genome_across %>%
+    filter(genome_set == "both") %>%
+    group_by(assembly_set, coassembly, representative) %>%
+    summarise(n = max(covered_fraction)) %>%
+    rename(genome_set = assembly_set) %>%
+    mutate(group = "covered_both") %>%
+    group_by(group) %>%
+    nest(),
+  # Genome chimerism (GUNC)
+  genome_across %>%
+    filter(genome_set == "both") %>%
+    group_by(assembly_set, coassembly, representative) %>%
+    summarise(n = max(pass.GUNC)) %>%
+    group_by(assembly_set, coassembly) %>%
+    summarise(n = mean(n)) %>%
+    rename(genome_set = assembly_set) %>%
+    mutate(group = "gunc_both") %>%
+    group_by(group) %>%
+    nest(),
+  ) %>%
+  mutate(
+    # Base model fit
+    base_fit = map2(group, data, ~ {
+      if (.x %in% c("quality_both", "covered_both")) lm(n ~ 1 + representative, data = .y)
+      else lm(n ~ 1 + coassembly, data = .y)
+      }),
+    # Test model fit
+    fit = map2(group, data, ~ {
+      if (.x %in% c("quality_both", "covered_both")) lm(n ~ genome_set + representative, data = .y)
+      else lm(n ~ genome_set + coassembly, data = .y)
+      }),
+    # Model comparison
+    tidy = map(fit, broom::tidy),
+    anova = map2(base_fit, fit, anova),
+    # Significance calculation
+    raw_pval = map_dbl(anova, ~ .x %>% broom::tidy() %>% slice(2) %>% pull(p.value)),
+    pval = p.adjust(raw_pval, method = "fdr"),
+    sig = pval < 0.05,
+    label = map_chr(pval, signif_stars),
+    # For plotting
+    genome_set = "single",
+    assembly_set = "single",
+    y = case_when(
+      group == "species" ~ 200,
+      str_detect(group, "quality") ~ 105,
+      str_detect(group, "completeness") ~ 105,
+      str_detect(group, "contamination") ~ 10,
+      str_detect(group, "covered") ~ 1.15,
+      str_detect(group, "gunc") ~ 0.3,
+      ),
+    xmin = "single",
+    xmax = "coassembly",
+  )
+
+#############################
+### Coassembly comparison ###
+#############################
+point_size <- 1
+across_coassembly_layers <- list(
+  stat_summary(fun = mean, geom = "bar", position = position_dodge(0.9)),
+  stat_summary(fun.data = mean_sd, geom = "errorbar", position = position_dodge(0.9), width = 0.25),
+  scale_x_discrete(breaks = genome_set_levels, labels = genome_set_labels),
+  scale_fill_manual(breaks = genome_set_levels, values = genome_set_values),
+  xlab(""),
+  theme_cowplot(),
+  theme(legend.position = "None")
+)
+
+across_species <- genome_across %>%
+  distinct(genome_set, coassembly, representative) %>%
+  group_by(genome_set, coassembly) %>%
+  count() %>%
+  ggplot(aes(genome_set, n, fill = genome_set)) +
+  across_coassembly_layers +
+  geom_point(position = position_jitterdodge(dodge.width = 0.9, jitter.width = 1), alpha = 0.5, size = point_size) +
+  geom_signif(
+    aes(xmin = xmin, xmax = xmax, annotations = label, y_position = y),
+    data = co_stats %>% filter(group == "species"), manual = TRUE, textsize = 3
+    ) +
+  scale_y_continuous(expand = c(0, NA), limits = c(0, 230)) +
+  ylab("Recovered species")
+across_species
+ggsave(here(output_dir, "across_species.png"), dpi = 600, width = 12, height = 7)
+
+#########################
+### Genome comparison ###
+#########################
+across_genomes_layers <- list(
+  stat_summary(fun = mean, geom = "bar", position = position_dodge(0.9)),
+  stat_summary(fun.data = mean_sd, geom = "errorbar", position = position_dodge(0.9), width = 0.25),
+  scale_x_discrete(breaks = assembly_set_levels, labels = assembly_set_labels),
+  scale_fill_manual(breaks = assembly_set_levels, values = assembly_set_values),
+  xlab(""),
+  theme_cowplot(),
+  theme(legend.position = "None")
+)
+
+across_quality <- genome_across %>%
+  filter(genome_set == "both") %>%
+  group_by(assembly_set, coassembly, representative) %>%
+  summarise(quality = max(quality)) %>%
+  ggplot(aes(assembly_set, quality, fill = assembly_set)) +
+  across_genomes_layers +
+  geom_point(position = position_jitterdodge(dodge.width = 0.9, jitter.width = 1), alpha = 0.05, size = point_size) +
+  geom_signif(
+    aes(xmin = xmin, xmax = xmax, annotations = label, y_position = y),
+    data = co_stats %>% filter(group == "quality_both"), manual = TRUE, textsize = 3
+    ) +
+  scale_y_continuous(
+    "Genome quality",
+    labels = scales::percent_format(accuracy = 1, scale = 1),
+    expand = expansion(mult = c(0, 0.05)),
+    limits = c(0, 115),
+    breaks = seq(0, 100, 25)
+    )
+across_quality
+ggsave(here(output_dir, "across_quality.png"), dpi = 600, width = 12, height = 7)
+
+across_completeness <- genome_across %>%
+  filter(genome_set == "both") %>%
+  group_by(assembly_set, coassembly, representative) %>%
+  summarise(completeness = max(completeness)) %>%
+  ggplot(aes(assembly_set, completeness, fill = assembly_set)) +
+  across_genomes_layers +
+  geom_point(position = position_jitterdodge(dodge.width = 0.9, jitter.width = 1), alpha = 0.05, size = point_size) +
+  geom_signif(
+    aes(xmin = xmin, xmax = xmax, annotations = label, y_position = y),
+    data = co_stats %>% filter(group == "completeness_both"), manual = TRUE, textsize = 3
+    ) +
+  scale_y_continuous(
+    "Genome completeness",
+    labels = scales::percent_format(accuracy = 1, scale = 1),
+    expand = expansion(mult = c(0, 0.05)),
+    limits = c(0, 115),
+    breaks = seq(0, 100, 25)
+    )
+across_completeness
+ggsave(here(output_dir, "across_completeness.png"), dpi = 600, width = 12, height = 7)
+
+across_contamination <- genome_across %>%
+  filter(genome_set == "both") %>%
+  group_by(assembly_set, coassembly, representative) %>%
+  summarise(contamination = min(contamination)) %>%
+  ggplot(aes(assembly_set, contamination, fill = assembly_set)) +
+  across_genomes_layers +
+  geom_point(position = position_jitterdodge(dodge.width = 0.9, jitter.width = 1), alpha = 0.05, size = point_size) +
+  geom_signif(
+    aes(xmin = xmin, xmax = xmax, annotations = label, y_position = y),
+    data = co_stats %>% filter(group == "contamination_both"), manual = TRUE, textsize = 3
+    ) +
+  scale_y_continuous(
+    "Genome contamination",
+    labels = scales::percent_format(accuracy = 1, scale = 1),
+    expand = expansion(mult = c(0, 0.05)),
+    limits = c(0, 10),
+    breaks = seq(0, 10, 2)
+    )
+across_contamination
+ggsave(here(output_dir, "across_contamination.png"), dpi = 600, width = 12, height = 7)
+
+across_covered <- genome_across %>%
+  filter(genome_set == "both") %>%
+  group_by(assembly_set, coassembly, representative) %>%
+  summarise(covered_fraction = max(covered_fraction)) %>%
+  ggplot(aes(assembly_set, covered_fraction, fill = assembly_set)) +
+  across_genomes_layers +
+  geom_point(position = position_jitterdodge(dodge.width = 0.9, jitter.width = 1), alpha = 0.5, size = point_size) +
+  geom_signif(
+    aes(xmin = xmin, xmax = xmax, annotations = label, y_position = y),
+    data = co_stats %>% filter(group == "covered_both"), manual = TRUE, textsize = 3
+    ) +
+  scale_y_continuous(
+    "Contig covered fraction",
+    labels = scales::percent_format(accuracy = 1),
+    expand = expansion(mult = c(0, 0.05)),
+    limits = c(0, 125) / 100,
+    breaks = seq(0, 100, 25) / 100
+    )
+across_covered
+ggsave(here(output_dir, "across_covered.png"), dpi = 600, width = 12, height = 7)
+
+across_gunc <- genome_across %>%
+  filter(genome_set == "both") %>%
+  group_by(assembly_set, coassembly) %>%
+  summarise(gunc_prop = 1 - mean(pass.GUNC)) %>%
+  ggplot(aes(assembly_set, gunc_prop, fill = assembly_set)) +
+  across_genomes_layers +
+  geom_point(position = position_jitterdodge(dodge.width = 0.9, jitter.width = 1), alpha = 0.5, size = point_size) +
+  geom_signif(
+    aes(xmin = xmin, xmax = xmax, annotations = label, y_position = y),
+    data = co_stats %>% filter(group == "gunc_both"), manual = TRUE, textsize = 3
+    ) +
+  scale_y_continuous(
+    "Genome chimerism (GUNC)",
+    labels = scales::percent_format(accuracy = 1),
+    expand = expansion(mult = c(0, 0.05)),
+    limits = c(0, 0.32)
+    )
+across_gunc
+ggsave(here(output_dir, "across_gunc.png"), dpi = 600, width = 12, height = 7)
+
+################
+### Combined ###
+################
+comb_layers <- list(
+  theme_cowplot(font_size = 10),
+  theme(legend.position = "None")
+)
+cowplot::plot_grid(
+  across_species + comb_layers,
+  across_quality + comb_layers,
+  across_completeness + comb_layers,
+  across_contamination + comb_layers,
+  across_covered + comb_layers,
+  across_gunc + comb_layers,
+  nrow = 2, #rel_widths = c(1.22, 1, 1, 1),
+  labels = "auto", label_size = 10, vjust = 1
+  )
+ggsave(here(output_dir, "across_combined.png"), dpi = 600, width = 180, height = 120, units = "mm")
+ggsave(here(output_dir, "across_combined.svg"), dpi = 600, width = 180, height = 120, units = "mm")
+
+#############
+### Stats ###
+#############
+genome_across %>%
+  group_by(genome_set, coassembly, representative) %>%
+  count() %>%
+  group_by(genome_set, coassembly) %>%
+  count() %>%
+  group_by(genome_set) %>%
+  summarise(n = mean(n)) %>%
+  pivot_wider(names_from = genome_set, values_from = n) %>%
+  mutate(coassembly_improvement = coassembly / (both + single))
+
+genome_across %>%
+  filter(genome_set == "both") %>%
+  group_by(assembly_set, coassembly, representative) %>%
+  summarise(
+    quality = max(quality),
+    completeness = max(completeness),
+    contamination = min(contamination),
+    covered_fraction = max(covered_fraction),
+    pass.GUNC = any(pass.GUNC),
+    ) %>%
+  pivot_wider(names_from = assembly_set, values_from = quality:pass.GUNC) %>%
+  mutate(
+    quality_improvement = quality_coassembly - quality_single,
+    completeness_improvement = completeness_coassembly - completeness_single,
+    contamination_improvement = contamination_coassembly - contamination_single,
+    covered_improvement = covered_fraction_coassembly - covered_fraction_single,
+    gunc_improvement = pass.GUNC_coassembly - pass.GUNC_single,
+  ) %>%
+  ungroup() %>%
+  summarise(
+    quality_improvement = mean(quality_improvement),
+    completeness_improvement = mean(completeness_improvement),
+    contamination_improvement = mean(contamination_improvement),
+    covered_improvement = mean(covered_improvement),
+    gunc_improvement = mean(gunc_improvement),
+  )
+```
+
+```{r binchicken-vs-sourmash}
+bc_vc_sm_plot <- binchicken_vs_sourmash %>%
+  arrange(desc(targets)) %>%
+  group_by(clusterer) %>%
+  slice_head(n = 59) %>%
+  mutate(clusterer = factor(clusterer, levels = c("binchicken", "sourmash"), labels = c("Bin Chicken", "Sourmash"))) %>%
+  ggplot(aes(clusterer, targets)) +
+  stat_summary(fun = mean, geom = "col") +
+  stat_summary(fun.data = mean_se, geom = "errorbar", width = 0.25) +
+  geom_jitter() +
+  xlab("Clusterer") +
+  ylab("Targets with at least 10x combined coverage") +
+  theme_cowplot(font_size = 10)
+bc_vc_sm_plot
+ggsave(here(output_dir, "binchicken_vs_sourmash.png"), dpi = 600, width = 12, height = 7)
+
+bc_vc_sm_plot2 <- binchicken_vs_sourmash_5 %>%
+  arrange(desc(targets)) %>%
+  group_by(clusterer) %>%
+  slice_head(n = 59) %>%
+  mutate(clusterer = factor(clusterer, levels = c("binchicken", "sourmash"), labels = c("Bin Chicken", "Sourmash"))) %>%
+  ggplot(aes(clusterer, targets)) +
+  stat_summary(fun = mean, geom = "col") +
+  stat_summary(fun.data = mean_se, geom = "errorbar", width = 0.25) +
+  geom_jitter() +
+  xlab("Clusterer") +
+  ylab("Targets with at least 5x combined coverage") +
+  theme_cowplot(font_size = 10)
+bc_vc_sm_plot2
+ggsave(here(output_dir, "binchicken_vs_sourmash_5.png"), dpi = 600, width = 12, height = 7)
+
+cowplot::plot_grid(bc_vc_sm_plot, bc_vc_sm_plot2, nrow = 1, labels = "auto", label_size = 10, vjust = 1)
+ggsave(here(output_dir, "binchicken_vs_sourmash_combined.png"), dpi = 600, width = 180, height = 120, units = "mm")
+```
+
+```{r assembly-runtime}
+assembly_runtime %>%
+  ggplot(aes(total_size / 10 ** 9, max_rss / 10 ** 3, colour = assembler)) +
+  geom_point() +
+  xlab("Total size (GB)") +
+  ylab("Max memory (GB)") +
+  theme_cowplot()
+ggsave(here(output_dir, "assembly_memory.png"), dpi = 600, width = 12, height = 7)
+
+assembly_runtime %>%
+  ggplot(aes(total_size / 10 ** 9, walltime / 60 / 60, colour = assembler)) +
+  geom_point() +
+  xlab("Total size (GB)") +
+  ylab("Walltime (hours)") +
+  theme_cowplot()
+ggsave(here(output_dir, "assembly_runtime.png"), dpi = 600, width = 12, height = 7)
+```

@@ -1,0 +1,1153 @@
+---
+title: "De novo tree analysis"
+author: "Samuel Aroney"
+date: "`r format(Sys.time(), '%d %B %Y')`"
+output:
+  bookdown::pdf_document2:
+    toc: FALSE
+  bookdown::html_document2: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, message = FALSE, warning = FALSE, error = FALSE, fig.width = 6, fig.asp = 0.618, out.width = "100%", fig.align = "center")
+
+library(castor)
+library(ggnewscale)
+library(ggtree)
+library(ggtreeExtra)
+library(tidytree)
+library(treeio)
+library(cowplot)
+library(tidyverse)
+library(here)
+
+output_dir <- here("results", "de_novo_tree_analysis_Rmd")
+dir.create(output_dir, recursive = TRUE)
+
+theme_set(theme_cowplot(font_family = "Arial"))
+theme_set(theme_tree(font_family = "Arial"))
+theme_set(theme_tree2(font_family = "Arial"))
+
+colour_brewer <- setNames(append(as.list(RColorBrewer::brewer.pal(12, "Paired")), c("#737373", "#FFFFFF", "#000000")), c("blue", "darkblue", "green", "darkgreen", "red", "darkred", "orange", "darkorange", "purple", "darkpurple", "yellow", "brown", "grey", "white", "black"))
+
+COMBINED_LABEL_REGEX <- ":"
+BOOTSTRAP_LABEL_REGEX <- "^[:digit:]{1}\\.[:digit:]{1,3}$"
+BOOTSTRAP_EXTRACT_REGEX <- "(?<=')[:digit:]{1}\\.[:digit:]{1,3}(?=:)"
+TAXA_REGEX <- "__"
+TAXA_EXTRACT_REGEX <- "(?<=:).*(?=')"
+GENOME_EXTRACT_REGEX <- "[^']+"
+RED_COMBINED_LABEL_REGEX <- "\\|[^']+"
+RED_EXTRACT_REGEX <- "(?<=\\|RED=)[:digit:]{1}\\.[:digit:]{1,3}"
+remove_red <- function(string) {
+  if (str_detect(string, RED_COMBINED_LABEL_REGEX)) {
+    string <- str_remove(string, RED_COMBINED_LABEL_REGEX)
+  }
+
+  if (!str_detect(string, COMBINED_LABEL_REGEX)) {
+    string <- str_remove_all(string, "'")
+  }
+
+  return(string)
+}
+
+extract_bootstrap <- function(string,
+                              combined_label_regex = COMBINED_LABEL_REGEX,
+                              bootstrap_label_regex = BOOTSTRAP_LABEL_REGEX,
+                              bootstrap_extract_regex = BOOTSTRAP_EXTRACT_REGEX) {
+  bootstrap <- NA
+
+  string <- remove_red(string)
+
+  if (str_detect(string, combined_label_regex)) {
+    bootstrap <- str_extract(string, bootstrap_extract_regex)
+  } else if (str_detect(string, bootstrap_label_regex)) {
+    bootstrap <- string
+  }
+
+  return(as.numeric(bootstrap))
+}
+
+extract_taxa <- function(string,
+                         combined_label_regex = COMBINED_LABEL_REGEX,
+                         taxa_regex = TAXA_REGEX,
+                         taxa_extract_regex = TAXA_EXTRACT_REGEX) {
+  taxa <- NA_character_
+
+  string <- remove_red(string)
+
+  if (str_detect(string, taxa_regex)) {
+    taxa <- str_extract(string, ".*")
+  }
+
+  if (str_detect(string, combined_label_regex)) {
+    taxa <- str_extract(string, taxa_extract_regex)
+  }
+
+  return(taxa)
+}
+
+extract_genome <- function(string,
+                        combined_label_regex = COMBINED_LABEL_REGEX,
+                        bootstrap_label_regex = BOOTSTRAP_LABEL_REGEX,
+                        taxa_regex = TAXA_REGEX,
+                        genome_extract_regex = GENOME_EXTRACT_REGEX) {
+  label <- NA_character_
+
+  string <- remove_red(string)
+
+  if (!str_detect(string, combined_label_regex) && !str_detect(string, bootstrap_label_regex) && !str_detect(string, taxa_regex)) {
+    label <- str_extract(string, genome_extract_regex)
+  }
+
+  return(label)
+}
+
+extract_red <- function(string,
+                        red_combined_label_regex = RED_COMBINED_LABEL_REGEX,
+                        red_extract_regex = RED_EXTRACT_REGEX) {
+  red <- NA_real_
+
+  if (str_detect(string, red_combined_label_regex)) {
+    red <- str_extract(string, red_extract_regex)
+  }
+
+  return(as.numeric(red))
+}
+
+tribble(
+    ~label,
+    "spire_mag_01842612",
+    "3300027742_44",
+    "binchicken_co19_513",
+    "GB_GCA_018819225.1",
+    "SRR3989344rbin.455",
+    "d__Archaea",
+    "'1.0:p__Altiarchaeota; c__Altiarchaeia'",
+    "'0.373:g__CAIYYO01'",
+    "1.0",
+    "0.996",
+    "'1.0:s__UBA285 sp002495025'",
+    "'spire_mag_01041117|RED=1.000'",
+    "'1.0:g__Xenobium|RED=0.931'",
+    "'0.953|RED=0.332'",
+    "'0.999:c__UBA5301|RED=0.440'",
+    "'1.0|RED=0.927'",
+  ) %>%
+  mutate(
+    bootstrap = map_dbl(label, extract_bootstrap),
+    taxa = map_chr(label, extract_taxa),
+    genome = map_chr(label, extract_genome),
+    RED = map_dbl(label, extract_red),
+  )
+```
+
+```{r wrangling}
+genome_metadata <- read_tsv(here("binchicken_RBGs", "metadata", "genome_metadata.tsv")) %>%
+  replace_na(list(rRNA_5S = 0, rRNA_16S = 0, rRNA_23S = 0, tRNAs = 0)) %>%
+  mutate(
+    quality = completeness - 5 * contamination,
+    rrna = rRNA_5S > 0 & rRNA_16S > 0 & rRNA_23S > 0,
+    trna = tRNAs > 0,
+    genome_quality = case_when(
+      completeness > 90 & contamination < 5 & rrna & trna ~ "High quality",
+      completeness >= 90 & contamination < 5 ~ "Near complete",
+      completeness >= 50 & contamination < 10 ~ "Medium quality",
+      TRUE ~ "Partial"
+      ),
+    genome_quality = factor(genome_quality, levels = c("High quality", "Near complete", "Medium quality")),
+  )
+
+magset_order <- c("UHGG", "GEM", "OceanDNA", "SPIRE", "SMAG", "Tengchong", "binchicken")
+extra_genomes <- read_tsv(here("binchicken_RBGs", "metadata", "extra_genomes.tsv"))
+
+pd <- bind_rows(
+    read_tsv(here("binchicken_RBGs", "archaeal_taxonomy", "phylogenetic_diversity.tsv"), comment = "[", skip = 1) %>% mutate(type = "archaea"),
+    read_tsv(here("binchicken_RBGs", "bacterial_taxonomy", "phylogenetic_diversity.tsv"), comment = "[", skip = 1) %>% mutate(type = "bacteria"),
+  ) %>%
+  rename(stat = 1, taxa = `No. Taxa`, PD_perc = `Percent PD`)
+
+pd_clade <- bind_rows(
+    read_tsv(here("binchicken_RBGs", "archaeal_taxonomy", "phylogenetic_diversity_clades.tsv")),
+    read_tsv(here("binchicken_RBGs", "bacterial_taxonomy", "phylogenetic_diversity_clades.tsv")),
+  ) %>%
+  rename(
+    clade = Clade, taxa_no = Taxa, PD_perc = `Percent PD`,
+    taxa_out = `Out Taxa`, PD_out = `Out PD`, PD_out_perc = `Out Percent PD`,
+    taxa_in = `In Taxa`, PD_in = `In PD`, PD_in_perc = `In Percent PD`,
+    PG = `In PG`, PG_perc = `In Percent PG`
+    )
+
+pd_phyla <- pd_clade %>%
+  mutate(phyla = str_extract(clade, "(?<=p__)[^;]+")) %>%
+  filter(!is.na(phyla)) %>%
+  mutate(
+    PG_phyla = cut(
+      PG_perc,
+      breaks = c(-1, 5, 10, 15, 20, 25, 100),
+      labels = c("<5%", "5-10%", "10-15%", "15-20%", "20-25%", ">25%")
+      )
+    )
+
+########################
+### Novelty from RED ###
+########################
+ROUND_DIGITS <- 2
+produce_ranks <- function(median_reds) {
+  ranks <- bind_rows(
+      tibble(
+        rank = c(""),
+        median_red = c(0)
+        ),
+      tibble(
+        rank = c("Phylum", "Class", "Order", "Family", "Genus"),
+        median_red = median_reds
+        ),
+      tibble(
+        rank = c("Species/Strain"),
+        median_red = c(1)
+        )
+      ) %>%
+    mutate(
+      cutoff_red = case_when(
+        rank == "" ~ 0,
+        rank == "Species/Strain" ~ 1,
+        TRUE ~ rowMeans(cbind(median_red, lead(median_red)))
+        ),
+      label = ifelse(rank == "", NA, str_c(rank, " (", round(lag(cutoff_red), ROUND_DIGITS), "-", round(cutoff_red, ROUND_DIGITS), "]")),
+      )
+
+  return(ranks)
+}
+
+rank_red <- tibble(rank = c("", "Phylum", "Class", "Order", "Family", "Genus", "Species/Strain")) %>%
+  left_join(
+    produce_ranks(c(0.314811688888667, 0.4464746502128289, 0.6104141834495891, 0.758688008084428, 0.924837140162601)) %>%
+    rename(bac_median_red = median_red, bac_cutoff_red = cutoff_red, bac_label = label)
+    ) %>%
+  left_join(
+    produce_ranks(c(0.21558932533434316, 0.3505859943816385, 0.5183858250371867, 0.7271022334250857, 0.9085026991836893)) %>%
+    rename(arc_median_red = median_red, arc_cutoff_red = cutoff_red, arc_label = label)
+    )
+
+tribble(
+    ~red, ~exp,
+    0.22, "phyla",
+    0.39, "class",
+    0.52, "class",
+    0.53, "order",
+    0.69, "family",
+    0.85, "genus",
+    0.90, "genus",
+    0.95, "genus",
+    0.98, "species",
+  ) %>%
+  mutate(
+    obs = cut(red, breaks = rank_red$bac_cutoff_red, labels = rank_red$bac_label[-1])
+    )
+
+##################
+### Load trees ###
+##################
+load_tree <- function(path, tree_data) {
+  binchicken_tree <- read.tree(path) %>%
+    as_tibble() %>%
+    left_join(tree_data %>% select(-c(branch.length, label, taxa)), by = c("parent", "node")) %>%
+    mutate(
+      taxa = map_chr(label, extract_taxa),
+      )
+
+  grouping_binchicken <- list(
+    binchicken = binchicken_tree %>% filter(!is.na(binchicken_leaf), binchicken_leaf) %>% pull(node),
+    notbinchicken = binchicken_tree %>% filter(!is.na(binchicken_leaf), !binchicken_leaf) %>% pull(node)
+    )
+
+  processed_tree <- binchicken_tree %>%
+    left_join(pd_clade, by = c("taxa" = "clade")) %>%
+    as.treedata() %>%
+    groupOTU(grouping_binchicken, "binchicken_group")
+
+  return(processed_tree)
+}
+
+load_iqtree <- function(path, tree_data) {
+  binchicken_tree <- read.tree(path) %>%
+    as_tibble() %>%
+    left_join(
+      tree_data %>%
+        filter(!is.na(genome)) %>%
+        select(label = genome, binchicken_leaf, magset, taxonomy, novelty_named) %>%
+        mutate(phyla_root = str_extract(taxonomy, "(?<=p__)[^;]+")),
+      by = "label"
+      ) %>%
+    mutate(bootstrap = as.integer(ifelse(is.na(binchicken_leaf), label, NA)))
+
+  grouping_binchicken <- list(
+    binchicken = binchicken_tree %>% filter(!is.na(binchicken_leaf), binchicken_leaf) %>% pull(node),
+    notbinchicken = binchicken_tree %>% filter(!is.na(binchicken_leaf), !binchicken_leaf) %>% pull(node)
+    )
+
+  processed_tree <- binchicken_tree %>%
+    as.treedata() %>%
+    groupOTU(grouping_binchicken, "binchicken_group")
+
+  return(processed_tree)
+}
+
+compile_tree <- function(subfolder) {
+  if (str_detect(subfolder, "bacteria")) {
+    red_labels <- rank_red$bac_label[-1]
+  } else {
+    red_labels <- rank_red$arc_label[-1]
+  }
+
+  named_taxonomy <- read_tsv(here(subfolder, "comb_named_taxonomy.tsv"))
+  tree_data <- read_tsv(here(subfolder, "phylorank_tree.tsv")) %>%
+    left_join(named_taxonomy) %>%
+    mutate(
+      novelty_red = factor(novelty_red, levels = red_labels),
+      novelty_named = case_when(
+        is.na(magset) ~ NA,
+        str_detect(taxonomy, str_c("p__", magset)) ~ "phylum",
+        str_detect(taxonomy, str_c("c__", magset)) ~ "class",
+        str_detect(taxonomy, str_c("o__", magset)) ~ "order",
+        str_detect(taxonomy, str_c("f__", magset)) ~ "family",
+        str_detect(taxonomy, str_c("g__", magset)) ~ "genus",
+        TRUE ~ "species"
+        ),
+      )
+  tree <- load_tree(here(subfolder, "named_decorated.tree"), tree_data)
+  class_tree <- load_iqtree(here(subfolder, "class.contree"), tree_data)
+  order_tree <- load_iqtree(here(subfolder, "order.contree"), tree_data)
+
+  node_names <- read_tsv(here(subfolder, "node_names.tsv"))
+  clade_novelty <- tibble(divergent_novelty = red_labels) %>%
+    mutate(level = str_extract(divergent_novelty, "^.") %>% tolower()) %>%
+    full_join(read_tsv(here(subfolder, "clade_novelty.tsv"))) %>%
+    replace_na(list(binchicken = 0)) %>%
+    mutate(label = str_c(binchicken, " ", divergent_novelty))
+
+  return(list(
+    tree_data = tree_data, named_taxonomy = named_taxonomy,
+    tree = tree,
+    node_names = node_names, clade_novelty = clade_novelty,
+    class_tree = class_tree, order_tree = order_tree
+    ))
+}
+
+bacterial <- compile_tree("binchicken_RBGs/bacterial_taxonomy")
+archaeal <- compile_tree("binchicken_RBGs/archaeal_taxonomy")
+
+########################
+### Load metabolisms ###
+########################
+genome_phyla <- bind_rows(archaeal$named_taxonomy, bacterial$named_taxonomy) %>%
+  mutate(
+    domain = str_extract(taxonomy, "(?<=d__)[^;]+"),
+    phylum = str_extract(taxonomy, "(?<=p__)[^;]+"),
+    class = str_extract(taxonomy, "(?<=c__)[^;]+"),
+    order = str_extract(taxonomy, "(?<=o__)[^;]+"),
+    family = str_extract(taxonomy, "(?<=f__)[^;]+"),
+    genus = str_extract(taxonomy, "(?<=g__)[^;]+"),
+    species = str_extract(taxonomy, "(?<=s__)[^;]+"),
+    )
+
+phyla_counts <- genome_phyla %>%
+  select(domain, phylum, species) %>%
+  distinct() %>%
+  group_by(domain, phylum) %>%
+  count(name = "total_genomes")
+
+annotation_grouping <- tribble(
+  ~level, ~colour,
+  "motility", "yellow",
+  "sulfur", "#e69138",
+  "nitrogen", "#7a51a1",
+  "carbon", "#4a86e8",
+  "parasitism", "#cc0000",
+  "fixation", "#0000ff",
+  "oxic photosynthesis", "#38761d",
+  "anoxic photosynthesis", "#783f04",
+)
+kos_of_interest <- tribble(
+  ~KEGG_ko, ~description, ~group, ~ short_name,
+  "K02556", "Flagella motA", "motility", "motA",
+  "K02410", "Flagella fliG", "motility", "fliG",
+  "K11180", "(r)sulfite reductase dsrA", "sulfur", "dsrA",
+  "K17224", "Sulfur oxidation soxB", "sulfur", "soxB",
+  "K00370", "Nitrate (oxido)reductase narG/nxrA", "nitrogen", "narG",
+  "K02567", "Nitrate reductase napA", "nitrogen", "napA",
+  "K00368", "Nitrite reductase nirK", "nitrogen", "nirK",
+  "K15864", "Nitrite reductase nirS", "nitrogen", "nirS",
+  "K02588", "Nitrogen fixation nifH", "nitrogen", "nifH",
+  "K22899", "Nitrogen fixation vnfH", "nitrogen", "vnfH",
+  "K10944", "Ammonia/methane monooxygenase amoA/pmoA", "carbon", "_moA",
+  "K16157", "Methane monooxygenase mmoX", "carbon", "mmoX",
+  "K00399", "Methanogenesis mcrA", "carbon", "mcrA",
+  "K03301", "Parasitism ATP/ADP translocase", "parasitism", "ATP/ADP",
+  "K01601", "Calvin-Benson RubisCO", "fixation", "RubisCO",
+  "K15230", "Reductive TCA aclA", "fixation", "aclA",
+  "K14138", "Wood-Ljungdahl acsB", "fixation", "acsB",
+  "K14468", "Fuchs-Holo mcr", "fixation", "mcr",
+  "K02437", "Reductive glycine gcvH", "fixation", "gcvH",
+  "K02689", "Oxygenic photosynthesis psaA", "oxic photosynthesis", "psaA",
+  "K02703", "Oxygenic photosynthesis psbA", "oxic photosynthesis", "psbA",
+  "K08928", "Anoxygenic photosynthesis (purple bacteria) pufL", "anoxic photosynthesis", "pufL",
+  "K08929", "Anoxygenic photosynthesis (purple bacteria) pufM", "anoxic photosynthesis", "pufM",
+  "K08944", "Anoxygenic photosynthesis (green sulfur) fmoA", "anoxic photosynthesis", "fmoA",
+)
+eggnog_annotations <- bind_rows(
+    read_tsv(here("binchicken_RBGs", "metabolism", "eggnog_filtered.tsv")),
+    read_tsv(here("binchicken_RBGs", "metabolism", "spire.tsv")),
+    read_tsv(here("binchicken_RBGs", "metabolism", "r214.tsv")),
+    ) %>%
+  select(genome, query, KEGG_ko, Description, Preferred_name) %>%
+  separate_rows(KEGG_ko, sep = ",") %>%
+  mutate(KEGG_ko = str_remove(KEGG_ko, "ko:")) %>%
+  left_join(kos_of_interest, by = "KEGG_ko") %>%
+  filter(!is.na(group)) %>%
+  left_join(genome_phyla, by = "genome")
+
+eggnog_summary <- eggnog_annotations %>%
+  group_by(phylum, group, short_name, KEGG_ko, description) %>%
+  summarise(count = n()) %>%
+  pivot_wider(id_cols = c(group, short_name, KEGG_ko, description), names_from = phylum, values_from = count, values_fill = 0) %>%
+  pivot_longer(cols = -c(group, short_name, KEGG_ko, description), names_to = "phylum", values_to = "count") %>%
+  full_join(phyla_counts %>% cross_join(kos_of_interest)) %>%
+  replace_na(list(count = 0)) %>%
+  mutate(
+    prop = count / total_genomes,
+    presence = count > 0,
+    short_name = factor(short_name, levels = unique(kos_of_interest$short_name)),
+    group = factor(group, levels = annotation_grouping$level),
+    ) %>%
+  filter(!is.na(phylum))
+```
+
+```{r plotting-function}
+############################
+### Check for open nodes ###
+############################
+check_open_nodes <- function(tree, custom) {
+  custom_taxa <- custom %>%
+    filter(type == "taxa")
+  custom_genomes <- custom %>%
+    filter(type == "genome")
+  custom_nodes <- custom %>%
+    filter(type == "node") %>%
+    mutate(pattern = as.integer(pattern))
+
+  collapsed_nodes <- tree %>%
+    as_tibble() %>%
+    mutate(
+      custom_taxa = map_lgl(taxa, ~ any(str_detect(., {{custom_taxa}}$pattern))),
+      custom_genomes = map_lgl(genome, ~ any(str_detect(., {{custom_genomes}}$pattern))),
+      custom_nodes = node %in% {{custom_nodes}}$pattern,
+      ) %>%
+    replace_na(list(custom_taxa = FALSE, custom_genomes = FALSE)) %>%
+    filter(str_detect(taxa, "p__") | custom_taxa | custom_genomes | custom_nodes) %>%
+    mutate(children = map(node, ~ offspring(tree, .))) %>%
+    mutate(node = map(node, ~c(.))) %>%
+    pivot_longer(c(node, children)) %>%
+    select(taxa, value) %>%
+    unnest(value)
+
+  open_nodes <- tree %>%
+    as_tibble() %>%
+    filter(!node %in% collapsed_nodes$value) %>%
+    select(parent, node, label, taxa, genome, taxonomy)
+
+  return(open_nodes)
+}
+
+#################################
+### Prune tree to phyla-level ###
+#################################
+add_custom_phyla <- function(tree, phyla_nodes, patterns, names, types) {
+  for (i in seq_along(patterns)) {
+    if (types[i] == "taxa") {
+      phyla_nodes <- phyla_nodes %>%
+        bind_rows(
+          tree %>%
+            as_tibble() %>%
+            filter(str_detect(taxa, patterns[i])) %>%
+            mutate(name = names[i], type = types[i])
+          )
+    } else if (types[i] == "genome") {
+      phyla_nodes <- phyla_nodes %>%
+        bind_rows(
+          tree %>%
+            as_tibble() %>%
+            filter(str_detect(genome, patterns[i])) %>%
+            mutate(name = names[i], type = types[i])
+          )
+    } else if (types[i] == "node") {
+      phyla_nodes <- phyla_nodes %>%
+        bind_rows(
+          tree %>%
+            as_tibble() %>%
+            filter(node == as.integer(patterns[i])) %>%
+            mutate(name = names[i], type = types[i])
+          )
+    }
+  }
+
+  return(phyla_nodes)
+}
+
+drop_leaves_until <- function(tree, target_label) {
+  target_node <- tree %>% as_tibble() %>% filter(label == target_label) %>% pull(node)
+  kids <- offspring(tree, target_node, type = "tips")
+  # print(tree %>% as_tibble() %>% filter(node %in% kids) %>% pull(label))
+
+  if (length(kids) == 0) {
+    return(tree)
+  }
+
+  tree <- drop.tip(tree, kids, trim.internal = FALSE, collapse.singles = FALSE)
+
+  return(drop_leaves_until(tree, target_label))
+}
+
+prune_to_phyla <- function(tree, custom_phyla) {
+  tree <- tree %>% mutate(label = as.character(node))
+
+  phyla_nodes <- tree %>%
+    as_tibble() %>%
+    filter(str_detect(taxa, "p__")) %>%
+    mutate(
+      name = str_extract(taxa, "(?<=p__)[^; ]+"),
+      type = "taxa"
+      )
+
+  phyla_nodes <- add_custom_phyla(
+      tree,
+      phyla_nodes,
+      custom_phyla$pattern,
+      custom_phyla$name,
+      custom_phyla$type
+      ) %>%
+    mutate(
+      no_offspring = map_int(node, ~ offspring(tree, .x, type = "tips") %>% length()),
+      no_offspring = ifelse(no_offspring == 0, 1, no_offspring),
+      name_label = str_c(name, " (", no_offspring, ")")
+      )
+
+  for (label in phyla_nodes$label) {
+    tree <- drop_leaves_until(tree, label)
+  }
+
+  tree <- tree %>%
+    left_join(phyla_nodes %>% select(label, name, type, no_offspring, name_label), by = "label")
+
+  return(tree)
+}
+
+##################
+### Plot trees ###
+##################
+plot_phyla_level <- function(tree, filename) {
+  if (str_detect(filename, "bacteria")) {
+    plot_height <- 750
+  } else {
+    plot_height <- 250
+  }
+
+  novelty_levels <- tree %>%
+    as_tibble() %>%
+    pull(novelty_red) %>%
+    levels()
+
+  phyla_tree <- tree %>%
+    mutate(
+      novelty_red = ifelse(is.na(novelty_red), 6, novelty_red),
+      novelty_red = factor(novelty_red, levels = c(1, 2, 3, 4, 5, 6), labels = novelty_levels),
+      ) %>%
+    ggtree(open.angle = 5, size = 0.15) +
+    geom_tree() +
+    geom_point2(
+      aes(
+        subset = !isTip,
+        colour = cut(bootstrap, c(0, 0.8, 0.9, 1)),
+        alpha = cut(bootstrap, c(0, 0.8, 0.9, 1))
+        ),
+      shape = 16,
+      size = 2
+      ) +
+    scale_colour_manual(
+      name = "Bootstrap support",
+      values = c("black", "grey30", "white"),
+      breaks = c("(0.9,1]", "(0.8,0.9]", "(0,0.8]"),
+      labels = c(">90%", ">80%", "<80%"),
+      ) +
+    scale_alpha_manual(
+      values = c(1, 1, 0),
+      breaks = c("(0.9,1]", "(0.8,0.9]", "(0,0.8]"),
+      guide = "none"
+      ) +
+    geom_point2(
+      aes(subset = isTip, angle = angle, fill = novelty_red),
+      shape = 21,
+      size = 4,
+      colour = "black",
+      ) +
+    scale_fill_brewer(name = "Inner rank", palette = "Set1", drop = FALSE) +
+    geom_tiplab(
+      aes(label = name_label), #, angle = angle),
+      offset = 0.05,
+      fontsize = 5
+      ) +
+    # xlim(-0.2, NA) +
+    geom_treescale(x = 0, y = 0, width = 0.1) #, label = "Tree scale: 0.1")
+
+  phyla_data <- tree %>%
+    as_tibble() %>%
+    filter(!is.na(name)) %>%
+    left_join(eggnog_summary, by = c("name" = "phylum"), relationship = "many-to-many") %>%
+    filter(!is.na(short_name), !is.na(label)) %>%
+    select(label, group, short_name, count, prop, presence)
+
+  fruiting_tree <- phyla_tree +
+    # Eggnog tiling
+    new_scale_fill() +
+    new_scale("alpha") +
+    geom_fruit(
+      data = phyla_data,
+      geom = geom_tile,
+      # mapping = aes(x = short_name, y = label, alpha = prop, fill = group),
+      mapping = aes(x = short_name, y = label, alpha = presence, fill = group),
+      pwidth = 1.5,
+      offset = 0.5,
+      colour = "grey50",
+      axis.params = list(
+        axis = "x",
+        text.angle = 270,
+        text.size = 3,
+        line.size = 0,
+        vjust = 0.5,
+        hjust = 0
+        )
+      ) +
+    # scale_alpha_continuous(range = c(0, 1), guide = guide_legend(order = 2)) +
+    scale_alpha_manual(breaks = c(TRUE, FALSE), values = c(1, 0), guide = guide_legend(order = 2)) +
+    scale_fill_manual(
+      breaks = annotation_grouping$level,
+      values = annotation_grouping$colour,
+      guide = guide_legend(order = 1)
+      )
+
+  print(fruiting_tree)
+  ggsave(str_c(filename, ".png"), path = output_dir, dpi = 600, width = 250, height = plot_height, units = "mm")
+  # ggsave(str_c(filename, ".svg"), path = output_dir, dpi = 600, width = 250, height = plot_height, units = "mm")
+
+  return(fruiting_tree)
+}
+
+plot_overall_diversity <- function(filename, named_phyla) {
+  if (str_detect(filename, "bacteria")) {
+    tree <- bacterial$tree
+    node_names <- bacterial$node_names
+    novelty_levels <- bacterial$clade_novelty$level
+    novelty_labels <- bacterial$clade_novelty$label
+    plot_size <- 160
+    spacing <- 0.05
+    clade_spacing <- 0.5
+  } else {
+    tree <- archaeal$tree
+    node_names <- archaeal$node_names
+    novelty_levels <- archaeal$clade_novelty$level
+    novelty_labels <- archaeal$clade_novelty$label
+    plot_size <- 75
+    spacing <- 0.1
+    clade_spacing <- 0.5
+  }
+
+  # Paul Tol's vibrant palette - colourblind friendly
+  novelty_colours <- c(
+    "#CC3311", # red
+    "#0077BB", # blue
+    "#009988", # teal
+    "#EE3377", # magenta
+    "#EE7733", # orange
+    "#33BBEE"  # cyan
+  )
+
+  genome_novelty <- node_names %>%
+    filter(str_detect(clade, "binchicken") | str_detect(clade, "s__")) %>%
+    mutate(
+      genome_novelty = str_extract(clade, "^.(?=__)"),
+      genome_novelty = factor(genome_novelty, levels = novelty_levels),
+      binchicken_leaf = TRUE,
+      ) %>%
+    select(genome = genome_rep, genome_novelty, clade, binchicken_leaf) %>%
+    group_by(genome, binchicken_leaf) %>%
+    slice_min(genome_novelty) %>%
+    filter(!is.na(genome_novelty))
+
+  diversity_tree <- tree %>%
+    mutate(phyla_root = str_extract(taxa, "(?<=p__)[^;]+"))
+
+  # Create phyla clade labels
+  phyla_nodes <- diversity_tree %>%
+    as_tibble() %>%
+    filter(!is.na(phyla_root)) %>%
+    mutate(
+      phyla_label = ifelse(phyla_root %in% named_phyla, phyla_root, "Other")
+      ) %>%
+    select(node, phyla_root, phyla_label)
+
+  phyla_clade_labels <- phyla_nodes %>%
+    filter(!phyla_label %in% c("0", "Other")) %>%
+    arrange(match(phyla_root, named_phyla)) %>%
+    mutate(plot_bars = row_number() %% 2 == 1)
+
+  # Add data to tree
+  diversity_tree <- diversity_tree %>%
+    groupClade(phyla_nodes %>% pull(node, name = phyla_root), "phyla") %>%
+    left_join(pd_phyla %>% select(phyla, PG_phyla)) %>%
+    mutate(PG_plot = phyla %in% named_phyla) %>%
+    left_join(genome_novelty, by = c("genome", "binchicken_leaf"))
+
+  diversity_plot <- diversity_tree %>%
+    ggtree(layout = "fan", open.angle = 10, aes(color = binchicken_group)) +
+    geom_tree(linewidth = 0.01) +
+    # Bin chicken tiling
+    geom_fruit(
+      geom = geom_tile,
+      mapping = aes(node = node, fill = binchicken_leaf),
+      pwidth = 0.2,
+      offset = spacing,
+      ) +
+    scale_colour_manual(breaks = c("binchicken", "notbinchicken"), values = c(colour_brewer$darkgreen, "grey"), guide = "none") +
+    scale_fill_manual(breaks = c(TRUE, FALSE), values = c(colour_brewer$darkgreen, "white"), name = "Rare biosphere genomes", guide = guide_legend(order = 1)) +
+    # Novelty shapes
+    new_scale_fill() +
+    new_scale_colour() +
+    geom_tippoint(
+      aes(x = max(x), fill = genome_novelty, colour = genome_novelty, subset = genome_novelty %in% {{novelty_levels}}[6]),
+      shape = 21, size = 0.5, na.rm = TRUE, colour = "black", stroke = 0.2
+      ) +
+    geom_tippoint(
+      aes(x = max(x), fill = genome_novelty, colour = genome_novelty, subset = genome_novelty %in% {{novelty_levels}}[5]),
+      shape = 21, size = 0.5, na.rm = TRUE, colour = "black", stroke = 0.2
+      ) +
+    geom_tippoint(
+      aes(x = max(x), fill = genome_novelty, colour = genome_novelty, subset = genome_novelty %in% {{novelty_levels}}[4]),
+      shape = 21, size = 1, na.rm = TRUE, colour = "black", stroke = 0.2
+      ) +
+    geom_tippoint(
+      aes(x = max(x), fill = genome_novelty, colour = genome_novelty, subset = genome_novelty %in% {{novelty_levels}}[3]),
+      shape = 21, size = 2, na.rm = TRUE, colour = "black", stroke = 0.2
+      ) +
+    geom_tippoint(
+      aes(x = max(x), fill = genome_novelty, colour = genome_novelty, subset = genome_novelty %in% {{novelty_levels}}[2]),
+      shape = 21, size = 3, na.rm = TRUE, colour = "black", stroke = 0.2
+      ) +
+    geom_tippoint(
+      aes(x = max(x), fill = genome_novelty, colour = genome_novelty, subset = genome_novelty %in% {{novelty_levels}}[1]),
+      shape = 21, size = 4, na.rm = TRUE, colour = "black", stroke = 0.2
+      ) +
+    scale_fill_manual(
+      name = "Genome novelty", values = novelty_colours,
+      breaks = novelty_levels, limits = novelty_levels, labels = novelty_labels,
+      guide = guide_legend(order = 2), drop = FALSE
+      ) +
+    scale_colour_manual(
+      name = "Genome novelty", values = novelty_colours,
+      breaks = novelty_levels, limits = novelty_levels, labels = novelty_labels,
+      guide = FALSE, drop = FALSE
+      ) +
+    # PG tiling
+    new_scale_fill() +
+    geom_fruit(
+      geom = geom_tile,
+      mapping = aes(node = node, fill = PG_phyla, subset = PG_plot),
+      pwidth = 0.2,
+      offset = spacing,
+      ) +
+    scale_fill_brewer(
+      palette = "YlGnBu",
+      direction = 1,
+      name = "Phylogenetic growth",
+      drop = FALSE,
+      # labels = scales::label_percent(scale = 1),
+      # guide = guide_colourbar(order = 4),
+      # limits = c(0, 30)
+      ) +
+    # Phyla tiling
+    # new_scale_fill() +
+    # geom_fruit(
+    #   geom = geom_tile,
+    #   mapping = aes(node = node, fill = phyla, subset = !phyla %in% c("0", "Other")),
+    #   pwidth = 0.2,
+    #   offset = 0.1,
+    #   ) +
+    # scale_fill_brewer(palette = "Set3", name = "Phyla", limits = named_phyla, guide = guide_legend(order = 3)) +
+    geom_cladelab(
+      data = phyla_clade_labels,
+      mapping = aes(
+        node = node,
+        label = phyla_label,
+        subset = plot_bars,
+        ),
+      angle = "auto",
+      align = TRUE,
+      offset = clade_spacing,
+      fontsize = 2,
+      barsize = 0.5,
+      ) +
+    geom_cladelab(
+      data = phyla_clade_labels,
+      mapping = aes(
+        node = node,
+        label = phyla_label,
+        subset = !plot_bars,
+        ),
+      angle = "auto",
+      align = TRUE,
+      offset = clade_spacing,
+      fontsize = 2,
+      barsize = NA,
+      )
+
+  print(diversity_plot + theme(legend.position = "none"))
+  ggsave(str_c(filename, ".png"), path = output_dir, dpi = 600, width = plot_size, height = plot_size, units = "mm")
+  ggsave(str_c(filename, ".svg"), path = output_dir, dpi = 600, width = plot_size, height = plot_size, units = "mm")
+
+  print(plot_grid(diversity_plot %>% get_legend()))
+  ggsave(str_c(filename, "_legend.png"), path = output_dir, dpi = 600, width = 150, height = 150, units = "mm")
+  ggsave(str_c(filename, "_legend.svg"), path = output_dir, dpi = 600, width = 150, height = 150, units = "mm")
+
+  return(diversity_tree)
+}
+
+check_incongruity <- function(tree, self) {
+  sibling_node <- offspring(tree, parent(tree, self), type = "tips")
+  cousin_node <- offspring(tree, parent(tree, parent(tree, self)), type = "tips")
+
+  tree %>%
+    as_tibble() %>%
+    filter(node %in% c(self, sibling_node, cousin_node)) %>%
+    mutate(
+      relationship = case_when(
+        node == self ~ "self",
+        node %in% sibling_node ~ "sibling",
+        node %in% cousin_node ~ "cousin"
+        )
+      ) %>%
+    select(node, relationship, taxonomy) %>%
+    separate(taxonomy, into = c("domain", "phylum", "class", "order", "family", "genus", "species"), sep = ";") %>%
+    mutate(relationship = str_c(relationship, node)) %>%
+    select(-node) %>%
+    pivot_longer(-relationship, names_to = "taxon", values_to = "clade") %>%
+    pivot_wider(names_from = relationship, values_from = clade) %>%
+    rowwise() %>%
+    mutate(
+      all_self_sibling = all(c_across(starts_with("sibling")) == c_across(starts_with("self"))),
+      any_self_sibling = any(c_across(starts_with("sibling")) == c_across(starts_with("self"))),
+      any_self_cousin = any(c_across(starts_with("cousin")) == c_across(starts_with("self"))),
+      any_sibling_cousin = any(
+        apply(
+          expand.grid(first = c_across(starts_with("cousin")), second = c_across(starts_with("sibling"))),
+          1,
+          function(row) {row["first"] == row["second"]}
+          )
+        ),
+      incongruity = case_when(
+        # Self and siblings are the same
+        all_self_sibling ~ "congruent",
+        # Only some siblings are the same
+        any_self_sibling ~ "incongruent",
+        # At least one cousin is the same (but not siblings)
+        any_self_cousin ~ "incongruent",
+        # At least one cousin is the same as a sibling (and self is different from all siblings/cousins)
+        any_sibling_cousin ~ "incongruent",
+        # Self is different from all siblings and cousins with no cross-over
+        TRUE ~ "different",
+        )
+      ) %>%
+    select(taxon, starts_with("self"), incongruity) %>%
+    rename(self = starts_with("self"))
+}
+
+plot_iqtree <- function(filename, tree) {
+  binchicken_congruency <- tree %>%
+    as_tibble() %>%
+    filter(!is.na(binchicken_leaf), binchicken_leaf) %>%
+    select(node) %>%
+    mutate(congruency = map(node, ~ check_incongruity(tree, .))) %>%
+    unnest(congruency) %>%
+    mutate(taxon = str_c(taxon, "_congruency")) %>%
+    pivot_wider(names_from = taxon, values_from = incongruity, id_cols = node)
+
+  # Paul Tol's vibrant palette - colourblind friendly
+  novelty_colours <- c(
+    "#CC3311", # red
+    "#0077BB", # blue
+    "#009988", # teal
+    "#EE3377", # magenta
+    "#EE7733", # orange
+    "#33BBEE"  # cyan
+  )
+  novelty_levels <- c("phylum", "class", "order", "family", "genus", "species")
+  novelty_labels <- c("Phylum", "Class", "Order", "Family", "Genus", "Species")
+
+  congruency_levels <- c("incongruent", "congruent", "different")
+
+  iqtree_plot <- tree %>%
+    left_join(binchicken_congruency) %>%
+    ggtree(layout = "fan", open.angle = 10, aes(color = binchicken_group)) +
+    geom_tree(linewidth = 0.01) +
+    scale_colour_manual(breaks = c("binchicken", "notbinchicken"), values = c(colour_brewer$darkgreen, "grey"), guide = "none") +
+    # Novelty shapes
+    new_scale_fill() +
+    new_scale_colour() +
+    geom_tippoint(
+      aes(x = max(x), fill = novelty_named, colour = novelty_named, subset = binchicken_leaf & novelty_named %in% {{novelty_levels}}[3]),
+      shape = 21, size = 2, na.rm = TRUE, colour = "black", stroke = 0.2
+      ) +
+    geom_tippoint(
+      aes(x = max(x), fill = novelty_named, colour = novelty_named, subset = binchicken_leaf & novelty_named %in% {{novelty_levels}}[2]),
+      shape = 21, size = 3, na.rm = TRUE, colour = "black", stroke = 0.2
+      ) +
+    geom_tippoint(
+      aes(x = max(x), fill = novelty_named, colour = novelty_named, subset = binchicken_leaf & novelty_named %in% {{novelty_levels}}[1]),
+      shape = 21, size = 4, na.rm = TRUE, colour = "black", stroke = 0.2
+      ) +
+    scale_fill_manual(
+      name = "Genome novelty", values = novelty_colours,
+      breaks = novelty_levels, limits = novelty_levels, labels = novelty_labels,
+      guide = guide_legend(order = 2), drop = FALSE
+      ) +
+    scale_colour_manual(
+      name = "Genome novelty", values = novelty_colours,
+      breaks = novelty_levels, limits = novelty_levels, labels = novelty_labels,
+      guide = FALSE, drop = FALSE
+      ) +
+    # Congruency tiling
+    new_scale_fill() +
+    geom_fruit(
+      geom = geom_tile,
+      mapping = aes(node = node, fill = class_congruency),
+      pwidth = 0.2,
+      offset = 0.1,
+      ) +
+    geom_fruit(
+      geom = geom_tile,
+      mapping = aes(node = node, fill = phylum_congruency),
+      pwidth = 0.2,
+      offset = 0.1,
+      ) +
+    scale_fill_manual(
+      name = "Congruency", values = novelty_colours,
+      breaks = congruency_levels, limits = congruency_levels, labels = congruency_levels,
+      drop = FALSE, na.value = "white"
+      )
+
+  print(iqtree_plot)
+  ggsave(str_c(filename, ".png"), path = output_dir, dpi = 600, width = 150, height = 150, units = "mm")
+
+  return(tree %>% as_tibble() %>% select(node, label, taxonomy) %>% inner_join(binchicken_congruency))
+}
+
+plot_iqtree_subset <- function(label, tree, congruency, output_subdir="iqtree_subset") {
+  tree <- tree %>%
+    tree_subset(label, levels_back = 2)
+
+  tree_data <- tree %>%
+    as_tibble() %>%
+    left_join(congruency %>% select(-node)) %>%
+    mutate(
+      congruency = ifelse(phylum_congruency == "incongruent" | class_congruency == "incongruent", "incongruent", "congruent"),
+      label2 = str_c(label, ": ", str_remove(taxonomy, ";o__.*")),
+      ) %>%
+    select(node, congruency, label2)
+
+  # Paul Tol's vibrant palette - colourblind friendly
+  congruency_colours <- c(
+    "#CC3311", # red
+    "#0077BB", # blue
+    "#009988", # teal
+    "#EE3377", # magenta
+    "#EE7733", # orange
+    "#33BBEE"  # cyan
+  )
+  congruency_levels <- c("incongruent", "congruent", "different")
+
+  tree_plot <- tree %>%
+    left_join(tree_data) %>%
+    ggtree(aes(color = congruency)) +
+    geom_tree() +
+    geom_rootedge() +
+    scale_colour_manual(
+      name = "Congruency", values = congruency_colours,
+      breaks = congruency_levels, limits = congruency_levels, labels = congruency_levels,
+      drop = FALSE, na.value = "grey50", guide = "none",
+      ) +
+    # Bootstrap shapes
+    new_scale_colour() +
+    geom_point2(
+      aes(
+        subset = !isTip,
+        colour = cut(bootstrap, c(0, 80, 90, 100)),
+        alpha = cut(bootstrap, c(0, 80, 90, 100))
+        ),
+      shape = 16,
+      size = 2
+      ) +
+    scale_colour_manual(
+      name = "Bootstrap support",
+      values = c("black", "grey30", "white"),
+      breaks = c("(90,100]", "(80,90]", "(0,80]"),
+      labels = c(">90%", ">80%", "<80%"),
+      guide = "none"
+      ) +
+    scale_alpha_manual(
+      values = c(1, 1, 0),
+      breaks = c("(90,100]", "(80,90]", "(0,80]"),
+      guide = "none"
+      ) +
+    # Congruency shapes
+    geom_tiplab(
+      aes(label = label2),
+      size = 3,
+      offset = 0.05,
+      colour = "black"
+      ) +
+    coord_cartesian(xlim = c(0, 4), clip = "off") +
+    theme(legend.position = "right")
+
+  print(tree_plot)
+  ggsave(str_c(label, ".png"), path = here(output_dir, output_subdir), dpi = 600, width = 150, height = 150, units = "mm")
+
+  return(TRUE)
+}
+```
+
+```{r plotting}
+######################
+### Bacterial tree ###
+######################
+bacterial_named_phyla <- c(
+  "Bacillota_I",
+  "Campylobacterota",
+  "Spirochaetota",
+  "Cyanobacteriota",
+  "Bacillota",
+  "Bacillota_A",
+  "Actinomycetota",
+  "Chloroflexota",
+  "Patescibacteria",
+  "Omnitrophota",
+  "Verrucomicrobiota",
+  "Planctomycetota",
+  "Gemmatimonadota",
+  "Bacteroidota",
+  "Acidobacteriota",
+  "Bdellovibrionota",
+  "Myxococcota",
+  "Nitrospirota",
+  "Desulfobacterota",
+  "Pseudomonadota"
+)
+
+bacterial_diversity_tree <- plot_overall_diversity("bacterial_overall_diversity", bacterial_named_phyla)
+bacterial_order_congruency <- plot_iqtree("bacterial_order_iqtree", bacterial$order_tree)
+bacterial_class_congruency <- plot_iqtree("bacterial_class_iqtree", bacterial$class_tree)
+
+bacterial_order_congruency %>%
+  filter(phylum_congruency == "incongruent" | class_congruency == "incongruent") %>%
+  mutate(
+    plot = map_lgl(label, ~ plot_iqtree_subset(., bacterial$order_tree, bacterial_congruency, "bacterial_order"))
+  )
+
+bacterial_class_congruency %>%
+  filter(phylum_congruency == "incongruent" | class_congruency == "incongruent") %>%
+  mutate(
+    plot = map_lgl(label, ~ plot_iqtree_subset(., bacterial$class_tree, bacterial_congruency, "bacterial_class"))
+  )
+
+#################################
+### Bacterial collapsed phyla ###
+#################################
+bacterial_single_genome_phyla <- bacterial$named_taxonomy %>%
+  mutate(phyla = str_extract(taxonomy, "(?<=p__)[^;]+")) %>%
+  group_by(phyla) %>%
+  summarise(count = n(), first = first(genome)) %>%
+  filter(count == 1) %>%
+  mutate(type = "genome") %>%
+  select(pattern = first, name = phyla, type)
+
+bacterial_custom_phyla <- bind_rows(
+  bacterial_single_genome_phyla,
+  tribble(
+    ~pattern, ~name, ~type,
+    "355054", "JAUYMQ01~a", "node",
+    "355059", "Desulfobacterota~a", "node",
+    "358887", "Bdellovibrionota~a", "node",
+    "359031", "Bdellovibrionota~b", "node",
+    )
+)
+
+bacterial_open_nodes <- check_open_nodes(bacterial$tree, bacterial_custom_phyla)
+bacterial_phyla_tree <- prune_to_phyla(bacterial$tree, bacterial_custom_phyla)
+bacterial_phyla <- plot_phyla_level(bacterial_phyla_tree, "bacterial_phyla")
+
+#####################
+### Archaeal tree ###
+#####################
+archaeal_named_phyla <- c(
+  "Altiarchaeota",
+  "Iainarchaeota",
+  "Micrarchaeota",
+  "Nanohaloarchaeota",
+  "Aenigmatarchaeota",
+  "Nanoarchaeota",
+  "Hadarchaeota",
+  "Methanobacteriota_B",
+  "Methanobacteriota",
+  "Asgardarchaeota",
+  "Thermoproteota",
+  "Halobacteriota",
+  "Thermoplasmatota"
+)
+
+archaeal_diversity_tree <- plot_overall_diversity("archaeal_overall_diversity", archaeal_named_phyla)
+archaeal_order_congruency <- plot_iqtree("archaeal_order_iqtree", archaeal$order_tree)
+archaeal_class_congruency <- plot_iqtree("archaeal_class_iqtree", archaeal$class_tree)
+
+archaeal_order_congruency %>%
+  filter(phylum_congruency == "incongruent" | class_congruency == "incongruent") %>%
+  mutate(
+    plot = map_lgl(label, ~ plot_iqtree_subset(., archaeal$order_tree, archaeal_congruency, "archaeal_order"))
+  )
+
+archaeal_class_congruency %>%
+  filter(phylum_congruency == "incongruent" | class_congruency == "incongruent") %>%
+  mutate(
+    plot = map_lgl(label, ~ plot_iqtree_subset(., archaeal$class_tree, archaeal_congruency, "archaeal_class"))
+  )
+
+################################
+### Archaeal collapsed phyla ###
+################################
+archaeal_single_genome_phyla <- archaeal$named_taxonomy %>%
+  mutate(phyla = str_extract(taxonomy, "(?<=p__)[^;]+")) %>%
+  group_by(phyla) %>%
+  summarise(count = n(), first = first(genome)) %>%
+  filter(count == 1) %>%
+  mutate(type = "genome") %>%
+  select(pattern = first, name = phyla, type)
+
+archaeal_custom_phyla <- bind_rows(
+  archaeal_single_genome_phyla,
+  tribble(
+    ~pattern, ~name, ~type,
+    "17403", "Hadarchaeota~a", "node",
+    "16766", "Methanobacteriota~a", "node",
+    )
+)
+
+archaeal_open_nodes <- check_open_nodes(archaeal$tree, archaeal_custom_phyla)
+archaeal_phyla_tree <- prune_to_phyla(archaeal$tree, archaeal_custom_phyla)
+archaeal_phyla <- plot_phyla_level(archaeal_phyla_tree, "archaeal_phyla")
+```

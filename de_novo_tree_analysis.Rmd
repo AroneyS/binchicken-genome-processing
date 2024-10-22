@@ -25,8 +25,8 @@ output_dir <- here("results", "de_novo_tree_analysis_Rmd")
 dir.create(output_dir, recursive = TRUE)
 
 theme_set(theme_cowplot(font_family = "Arial"))
-theme_set(theme_tree(font_family = "Arial"))
-theme_set(theme_tree2(font_family = "Arial"))
+theme_set(theme_tree(font_family = "Arial")[[3]])
+theme_set(theme_tree2(font_family = "Arial")[[3]])
 
 colour_brewer <- setNames(append(as.list(RColorBrewer::brewer.pal(12, "Paired")), c("#737373", "#FFFFFF", "#000000")), c("blue", "darkblue", "green", "darkgreen", "red", "darkred", "orange", "darkorange", "purple", "darkpurple", "yellow", "brown", "grey", "white", "black"))
 

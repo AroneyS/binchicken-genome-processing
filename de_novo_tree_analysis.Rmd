@@ -1057,13 +1057,13 @@ bacterial_class_congruency <- plot_iqtree("bacterial_class_iqtree", bacterial$cl
 bacterial_order_congruency %>%
   filter(phylum_congruency == "incongruent" | class_congruency == "incongruent") %>%
   mutate(
-    plot = map_lgl(label, ~ plot_iqtree_subset(., bacterial$order_tree, bacterial_congruency, "bacterial_order"))
+    plot = map_lgl(label, ~ plot_iqtree_subset(., bacterial$order_tree, bacterial_order_congruency, "bacterial_order"))
   )
 
 bacterial_class_congruency %>%
   filter(phylum_congruency == "incongruent" | class_congruency == "incongruent") %>%
   mutate(
-    plot = map_lgl(label, ~ plot_iqtree_subset(., bacterial$class_tree, bacterial_congruency, "bacterial_class"))
+    plot = map_lgl(label, ~ plot_iqtree_subset(., bacterial$class_tree, bacterial_class_congruency, "bacterial_class"))
   )
 
 #################################
@@ -1118,13 +1118,13 @@ archaeal_class_congruency <- plot_iqtree("archaeal_class_iqtree", archaeal$class
 archaeal_order_congruency %>%
   filter(phylum_congruency == "incongruent" | class_congruency == "incongruent") %>%
   mutate(
-    plot = map_lgl(label, ~ plot_iqtree_subset(., archaeal$order_tree, archaeal_congruency, "archaeal_order"))
+    plot = map_lgl(label, ~ plot_iqtree_subset(., archaeal$order_tree, archaeal_order_congruency, "archaeal_order"))
   )
 
 archaeal_class_congruency %>%
   filter(phylum_congruency == "incongruent" | class_congruency == "incongruent") %>%
   mutate(
-    plot = map_lgl(label, ~ plot_iqtree_subset(., archaeal$class_tree, archaeal_congruency, "archaeal_class"))
+    plot = map_lgl(label, ~ plot_iqtree_subset(., archaeal$class_tree, archaeal_class_congruency, "archaeal_class"))
   )
 
 ################################

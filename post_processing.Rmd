@@ -1871,6 +1871,64 @@ phyla_rarefied_coassembly <- rarefied_genomes_coassembly %>%
   scale_y_continuous("# of novel phyla", labels = scales::comma) +
   scale_colour_brewer(breaks = c("Bacteria", "Archaea"), palette = "Set1") +
   theme(legend.position = "none")
+
+rarefy_stats <- bind_rows(
+  rarefied_genomes_coassembly %>%
+    filter(taxon %in% c("phylum", "order", "species")) %>%
+    mutate(domain = factor(domain, levels = c("d__Bacteria", "d__Archaea"), labels = c("Bacteria", "Archaea"))) %>%
+    select(step, unique, taxon, domain),
+) %>%
+  group_by(taxon, domain) %>%
+  nest() %>%
+  mutate(
+    lm = map(data, ~ lm(unique ~ step, data = .)),
+    slope = map_dbl(lm, ~ coef(.)[2]),
+    label = case_when(
+      taxon == "species" & domain == "Bacteria" ~ str_c(round(slope, 0), " / coassembly"),
+      taxon == "species" & domain == "Archaea" ~ str_c(round(slope, 0), " / coassembly"),
+      taxon == "order" & domain == "Bacteria" ~ str_c(""),
+      taxon == "order" & domain == "Archaea" ~ str_c(""),
+      taxon == "phylum" & domain == "Bacteria" ~ str_c(""),
+      ),
+    step = case_when(
+      taxon == "species" & domain == "Bacteria" ~ 250,
+      taxon == "species" & domain == "Archaea" ~ 500,
+      taxon == "order" & domain == "Bacteria" ~ 1e3,
+      taxon == "order" & domain == "Archaea" ~ 1e3,
+      taxon == "phylum" & domain == "Bacteria" ~ 1e3,
+      ),
+    unique = case_when(
+      taxon == "species" & domain == "Bacteria" ~ 15e3,
+      taxon == "species" & domain == "Archaea" ~ 5e3,
+      taxon == "order" & domain == "Bacteria" ~ 1e3,
+      taxon == "order" & domain == "Archaea" ~ 1e3,
+      taxon == "phylum" & domain == "Bacteria" ~ 1e3,
+      ),
+  )
+
+cowplot::plot_grid(
+  species_rarefied_coassembly +
+    geom_text(aes(label = label), data = rarefy_stats %>% filter(taxon == "species"), size = 5 / .pt) +
+    scale_y_continuous("Novel species", labels = scales::label_number(scale_cut = scales::cut_short_scale())) +
+    xlab("Rarefied coassemblies") +
+    theme_cowplot(font_size = 7) +
+    theme(legend.position = "none"),
+  order_rarefied_coassembly +
+    scale_y_continuous("Novel orders", labels = scales::label_number(scale_cut = scales::cut_short_scale())) +
+    xlab("Rarefied coassemblies") +
+    theme_cowplot(font_size = 7) +
+    theme(legend.position = "none"),
+  phyla_rarefied_coassembly +
+    scale_y_continuous("Novel phyla", labels = scales::label_number(scale_cut = scales::cut_short_scale())) +
+    xlab("Rarefied coassemblies") +
+    theme_cowplot(font_size = 7) +
+    theme(legend.position = "none"),
+  nrow = 1,
+  labels = "auto", label_size = 10,
+  align = "hv"
+)
+ggsave(here(output_dir, "accumulation_curves_combined.png"), dpi = 600, width = 180, height = 30, units = "mm")
+ggsave(here(output_dir, "accumulation_curves_combined.svg"), dpi = 600, width = 180, height = 30, units = "mm")
 ```
 
 ```{r prev-and-abund}

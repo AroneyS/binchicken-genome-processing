@@ -16,9 +16,10 @@ import numpy as np
 def rarefy(taxonomy, genomes, column="clade", join="name", steps=100, iterations=10):
     max_size = genomes.height
     step_size = max_size // steps
+    integer_steps = max_size // step_size
     results = []
 
-    for i in range(1, steps + 1):
+    for i in range(1, integer_steps + 1):
         sample_size = step_size * i
         unique_counts = []
         for _ in range(iterations):

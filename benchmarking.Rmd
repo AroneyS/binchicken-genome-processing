@@ -249,7 +249,7 @@ co_stats <- bind_rows(
 point_size <- 1
 across_coassembly_layers <- list(
   stat_summary(fun = mean, geom = "bar", position = position_dodge(0.9)),
-  stat_summary(fun.data = mean_sd, geom = "errorbar", position = position_dodge(0.9), width = 0.25),
+  stat_summary(fun.data = mean_sd, geom = "errorbar", colour = "red", position = position_dodge(0.9), width = 0.25),
   scale_x_discrete(breaks = genome_set_levels, labels = genome_set_labels),
   scale_fill_manual(breaks = genome_set_levels, values = genome_set_values),
   xlab(""),
@@ -278,7 +278,7 @@ ggsave(here(output_dir, "across_species.png"), dpi = 600, width = 12, height = 7
 #########################
 across_genomes_layers <- list(
   stat_summary(fun = mean, geom = "bar", position = position_dodge(0.9)),
-  stat_summary(fun.data = mean_sd, geom = "errorbar", position = position_dodge(0.9), width = 0.25),
+  stat_summary(fun.data = mean_sd, geom = "errorbar", colour = "red", position = position_dodge(0.9), width = 0.25),
   scale_x_discrete(breaks = assembly_set_levels, labels = assembly_set_labels),
   scale_fill_manual(breaks = assembly_set_levels, values = assembly_set_values),
   xlab(""),

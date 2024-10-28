@@ -952,20 +952,33 @@ taxon_suitable_counts <- sample_metadata %>%
   arrange(desc(samples)) %>%
   filter(!is.na(group))
 
+taxon_used_counts <- genome_sources %>%
+  distinct(metagroup, group, samples) %>%
+  count(metagroup, group) %>%
+  rename(samples_used = n)
+
 genomes_per_sample <- genome_sources %>%
   distinct(metagroup, group, rep) %>%
   count(metagroup, group) %>%
   full_join(taxon_suitable_counts) %>%
+  left_join(taxon_used_counts) %>%
   replace_na(list(n = 0)) %>%
-  mutate(genomes_per_sample = n / samples)
+  mutate(
+    genomes_per_sample = n / samples,
+    genomes_per_sample_used = n / samples_used
+    )
 
 novel_genomes_per_sample <- genome_sources %>%
   filter(!is.na(novel), novel) %>%
   distinct(metagroup, group, rep) %>%
   count(metagroup, group) %>%
   full_join(taxon_suitable_counts) %>%
+  left_join(taxon_used_counts) %>%
   replace_na(list(n = 0)) %>%
-  mutate(genomes_per_sample = n / samples)
+  mutate(
+    genomes_per_sample = n / samples,
+    genomes_per_sample_used = n / samples_used
+    )
 
 plot_biomes <- function(prefix = "") {
   if (prefix == "novel") {
@@ -1025,7 +1038,7 @@ plot_biomes <- function(prefix = "") {
 
   biome_per_sample_plot <- df %>%
     filter(samples > 10) %>%
-    ggplot(aes(samples, genomes_per_sample, colour = metagroup)) +
+    ggplot(aes(samples, genomes_per_sample_used, colour = metagroup)) +
     geom_point() +
     geom_text_repel(aes(label = group), colour = "black", size = 5 / .pt, min.segment.length = 0.3) +
     scale_x_log10() +

@@ -76,6 +76,8 @@ genome_metadata <- bind_rows(
   left_join(combined_clusters, by = c("name" = "genome")) %>%
   left_join(combined_gunc %>% select(name, pass.GUNC))
 
+computational_benchmarks <- read_tsv(here("data", "computational_benchmarks.tsv"))
+
 across_representatives <- genome_metadata %>%
   distinct(representative, coassembly, genome_set) %>%
   group_by(representative, coassembly) %>%
@@ -486,7 +488,39 @@ cowplot::plot_grid(bc_vc_sm_plot, bc_vc_sm_plot2, nrow = 1, labels = "auto", lab
 ggsave(here(output_dir, "binchicken_vs_sourmash_combined.png"), dpi = 600, width = 180, height = 120, units = "mm")
 ```
 
-```{r assembly-runtime}
+```{r computational-benchmarks}
+computational_benchmarks %>%
+  mutate(stage = ifelse(stage == "appraise", "Reference genome appraisal", "Sample clustering")) %>%
+  group_by(project, samples, stage) %>%
+  summarise(cpu_time = sum(cpu_time)) %>%
+  ggplot(aes(samples, cpu_time/60)) +
+  geom_point(shape = 21, size = 3) +
+  facet_wrap(~stage) +
+  xlab("Number of samples in project") +
+  ylab("CPU time taken (min)") +
+  theme_cowplot()
+ggsave(here(output_dir, "computational_comb.png"), dpi = 600, width = 12, height = 7)
+
+computational_benchmarks %>%
+  filter(stage == "appraise") %>%
+  ggplot(aes(samples, cpu_time/60)) +
+  geom_point() +
+  xlab("Number of samples in project") +
+  ylab("CPU time taken (min)") +
+  theme_cowplot()
+ggsave(here(output_dir, "computational_appraise.png"), dpi = 600, width = 12, height = 7)
+
+computational_benchmarks %>%
+  filter(stage != "appraise") %>%
+  group_by(project, samples) %>%
+  summarise(cpu_time = sum(cpu_time)) %>%
+  ggplot(aes(samples, cpu_time/60)) +
+  geom_point() +
+  xlab("Number of samples in project") +
+  ylab("CPU time taken (min)") +
+  theme_cowplot()
+ggsave(here(output_dir, "computational_cluster.png"), dpi = 600, width = 12, height = 7)
+
 assembly_runtime %>%
   ggplot(aes(total_size / 10 ** 9, max_rss / 10 ** 3, colour = assembler)) +
   geom_point() +

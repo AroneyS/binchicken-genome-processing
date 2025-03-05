@@ -560,6 +560,10 @@ protein_rarefy <- bind_rows(
   group_by(rarefy) %>%
   mutate(last = step == max(step)) %>%
   ungroup()
+
+protein_bc_non_singletons <- read_tsv(here("binchicken_RBGs", "metabolism", "binchicken_unique_annotations.tsv"))
+bc_non_singletons <- read_tsv(here("binchicken_RBGs", "metabolism", "binchicken_unique_list.tsv"), col_names = c("cluster")) %>%
+  left_join(protein_bc_non_singletons, by = c("cluster" = "#query"))
 ```
 
 ```{r genome-quality}
@@ -2297,6 +2301,134 @@ proteins_teas_pathways_lines <- genome_teas_pathways %>%
     )
 proteins_teas_pathways_lines
 ggsave("proteins_teas_pathways_lines.png", path = output_dir, dpi = 600, height = 7, width = 12)
+
+######################
+### Novel clusters ###
+######################
+novel_proteins <- bc_non_singletons %>%
+  mutate(
+    KEGG_ko = ifelse(KEGG_ko == "-", NA_character_, KEGG_ko),
+    EC = ifelse(EC == "-", NA_character_, EC),
+    PFAMs = ifelse(PFAMs == "-", NA_character_, PFAMs),
+    CAZy = ifelse(CAZy == "-", NA_character_, CAZy),
+    BiGG_Reaction = ifelse(BiGG_Reaction == "-", NA_character_, BiGG_Reaction),
+    COG_category = ifelse(COG_category == "-", NA_character_, COG_category),
+    novelty = case_when(
+      is.na(seed_ortholog) ~ "No hits",
+      !is.na(KEGG_ko) | !is.na(EC) | !is.na(CAZy) | !is.na(BiGG_Reaction) ~ "Known enzyme",
+      !is.na(PFAMs) ~ "Known domain",
+      !is.na(COG_category) ~ "Known COG category",
+      TRUE ~ "Uncharacterised",
+      )
+    ) %>%
+  group_by(novelty) %>%
+  count() %>%
+  ggplot(aes(reorder(novelty, n), n)) +
+  geom_col() +
+  coord_flip() +
+  scale_y_continuous("Count") +
+  scale_x_discrete("Novelty") +
+  theme_cowplot()
+novel_proteins
+ggsave("novel_proteins.png", path = output_dir, dpi = 600, height = 7, width = 12)
+
+novel_cogs <- bc_non_singletons %>%
+  replace_na(list(COG_category = "-")) %>%
+  mutate(COG_category = ifelse(COG_category == "-", "Unknown", COG_category)) %>%
+  filter(COG_category != "Unknown") %>%
+  group_by(COG_category) %>%
+  count() %>%
+  arrange(desc(n)) %>%
+  head(20) %>%
+  ggplot(aes(reorder(COG_category, n), n)) +
+  geom_col() +
+  coord_flip() +
+  scale_y_continuous("Count") +
+  scale_x_discrete("COG category (top 20)") +
+  theme_cowplot()
+novel_cogs
+ggsave("novel_cogs.png", path = output_dir, dpi = 600, height = 7, width = 12)
+
+novel_name <- bc_non_singletons %>%
+  replace_na(list(Preferred_name = "-")) %>%
+  mutate(Preferred_name = ifelse(Preferred_name == "-", "Unknown", Preferred_name)) %>%
+  filter(Preferred_name != "Unknown") %>%
+  group_by(Preferred_name) %>%
+  count() %>%
+  arrange(desc(n)) %>%
+  head(20) %>%
+  ggplot(aes(reorder(Preferred_name, n), n)) +
+  geom_col() +
+  coord_flip() +
+  scale_y_continuous("Count") +
+  scale_x_discrete("Gene name (top 20)") +
+  theme_cowplot()
+novel_name
+ggsave("novel_name.png", path = output_dir, dpi = 600, height = 7, width = 12)
+
+novel_ko <- bc_non_singletons %>%
+  replace_na(list(KEGG_ko = "-")) %>%
+  mutate(KEGG_ko = ifelse(KEGG_ko == "-", "Unknown", KEGG_ko)) %>%
+  filter(KEGG_ko != "Unknown") %>%
+  group_by(KEGG_ko) %>%
+  count() %>%
+  arrange(desc(n)) %>%
+  head(20) %>%
+  ggplot(aes(reorder(KEGG_ko, n), n)) +
+  geom_col() +
+  coord_flip() +
+  scale_y_continuous("Count") +
+  scale_x_discrete("KEGG ko ID (top 20)") +
+  theme_cowplot()
+novel_ko
+ggsave("novel_ko.png", path = output_dir, dpi = 600, height = 7, width = 12)
+
+novel_kegg_module <- bc_non_singletons %>%
+  replace_na(list(KEGG_Module = "-")) %>%
+  mutate(KEGG_Module = ifelse(KEGG_Module == "-", "Unknown", KEGG_Module)) %>%
+  filter(KEGG_Module != "Unknown") %>%
+  group_by(KEGG_Module) %>%
+  count() %>%
+  arrange(desc(n)) %>%
+  head(20) %>%
+  ggplot(aes(reorder(KEGG_Module, n), n)) +
+  geom_col() +
+  coord_flip() +
+  scale_y_continuous("Count") +
+  scale_x_discrete("KEGG module (top 20)") +
+  theme_cowplot()
+novel_kegg_module
+ggsave("novel_kegg_module.png", path = output_dir, dpi = 600, height = 7, width = 12)
+
+novel_pfam <- bc_non_singletons %>%
+  replace_na(list(PFAMs = "-")) %>%
+  mutate(PFAMs = ifelse(PFAMs == "-", "Unknown", PFAMs)) %>%
+  filter(PFAMs != "Unknown") %>%
+  group_by(PFAMs) %>%
+  count() %>%
+  arrange(desc(n)) %>%
+  head(20) %>%
+  ggplot(aes(reorder(PFAMs, n), n)) +
+  geom_col() +
+  coord_flip() +
+  scale_y_continuous("Count") +
+  scale_x_discrete("PFAM (top 20)") +
+  theme_cowplot()
+novel_pfam
+ggsave("novel_pfam.png", path = output_dir, dpi = 600, height = 7, width = 12)
+
+cowplot::plot_grid(
+  novel_proteins + theme_cowplot(font_size = 7),
+  novel_cogs + theme_cowplot(font_size = 7),
+  novel_ko + theme_cowplot(font_size = 7),
+  novel_pfam + theme_cowplot(font_size = 7),
+  nrow = 2,
+  labels = "auto", label_size = 10,
+  align = "h", axis = "lrtb"
+)
+
+ggsave("novel_proteins_comb.png", path = output_dir, dpi = 600, width = 180, height = 120, units = "mm")
+ggsave("novel_proteins_comb.svg", path = output_dir, dpi = 600, width = 180, height = 120, units = "mm")
 ```
 
 ```{r proteins-together}
@@ -2353,4 +2485,83 @@ cowplot::plot_grid(
 
 ggsave("proteins.png", path = output_dir, dpi = 600, width = 180, height = 120, units = "mm")
 ggsave("proteins.svg", path = output_dir, dpi = 600, width = 180, height = 120, units = "mm")
+```
+
+```{r novelty-size}
+novel_genome_metadata <- genome_metadata %>%
+  select(name, rep = `95ANI_representative`) %>%
+  filter(!is.na(rep)) %>%
+  left_join(named_taxonomy %>% select(rep = name, named_taxonomy)) %>%
+  mutate(
+    domain = str_extract(named_taxonomy, "d__[^;]+"),
+    named_novelty = case_when(
+      str_detect(named_taxonomy, "p__binchicken") ~ "Phylum novelty",
+      str_detect(named_taxonomy, "c__binchicken") ~ "Class novelty",
+      str_detect(named_taxonomy, "o__binchicken") ~ "Order novelty",
+      str_detect(named_taxonomy, "f__binchicken") ~ "Family novelty",
+      str_detect(named_taxonomy, "g__binchicken") ~ "Genus novelty",
+      !is.na(named_taxonomy) ~ "Species novelty",
+      TRUE ~ "Not Novel"
+      ),
+    novel_phylum = str_extract(named_taxonomy, "p__binchicken[^;]+"),
+    novel_class = str_extract(named_taxonomy, "c__binchicken[^;]+"),
+    novel_order = str_extract(named_taxonomy, "o__binchicken[^;]+"),
+    novel_family = str_extract(named_taxonomy, "f__binchicken[^;]+"),
+    novel_genus = str_extract(named_taxonomy, "g__binchicken[^;]+"),
+    novel_species = str_extract(named_taxonomy, "s__.*"),
+    )
+
+# Phylum
+novel_genome_metadata %>%
+  filter(!is.na(novel_phylum)) %>%
+  group_by(domain, novel_phylum) %>%
+  count() %>% 
+  filter(n > 1) %>% 
+  group_by(domain) %>% 
+  count()
+
+# Class
+novel_genome_metadata %>%
+  filter(!is.na(novel_class)) %>%
+  group_by(domain, novel_class) %>%
+  count() %>% 
+  filter(n > 1) %>% 
+  group_by(domain) %>% 
+  count()
+
+# Order
+novel_genome_metadata %>%
+  filter(!is.na(novel_order)) %>%
+  group_by(domain, novel_order) %>%
+  count() %>% 
+  filter(n > 1) %>% 
+  group_by(domain) %>% 
+  count()
+
+# Family
+novel_genome_metadata %>%
+  filter(!is.na(novel_family)) %>%
+  group_by(domain, novel_family) %>%
+  count() %>% 
+  filter(n > 1) %>% 
+  group_by(domain) %>% 
+  count()
+
+# Genus
+novel_genome_metadata %>%
+  filter(!is.na(novel_genus)) %>%
+  group_by(domain, novel_genus) %>%
+  count() %>% 
+  filter(n > 1) %>% 
+  group_by(domain) %>% 
+  count()
+
+# Species
+novel_genome_metadata %>%
+  filter(!is.na(novel_species)) %>%
+  group_by(domain, novel_species) %>%
+  count() %>%
+  filter(n > 1) %>%
+  group_by(domain) %>%
+  count()
 ```

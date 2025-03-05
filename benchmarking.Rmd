@@ -151,8 +151,16 @@ binchicken_vs_sourmash_5 <- bind_rows(
     mutate(clusterer = "binchicken")
   )
 
+strain_purity_genomes <- read_tsv(here("binchicken_RBGs", "metadata", "strain_purity_genomes.tsv")) %>%
+  group_by(coassembly, gene, representative) %>%
+  summarise(genome = str_c(genome, sep = ",", collapse = ","))
+strain_purity_separate_genomes <- read_tsv(here("binchicken_RBGs", "metadata", "strain_purity_separate_genomes.tsv")) %>%
+  group_by(coassembly, sample, gene, representative) %>%
+  summarise(genome = str_c(genome, sep = ",", collapse = ","))
+
 strain_purity <- read_tsv(here("binchicken_RBGs", "metadata", "strain_purity.tsv"))
-strain_purity_separate <- read_tsv(here("binchicken_RBGs", "metadata", "strain_purity_separate.tsv"))
+strain_purity_separate <- read_tsv(here("binchicken_RBGs", "metadata", "strain_purity_separate.tsv")) %>%
+  left_join(strain_purity_separate_genomes)
 
 strain_purity_combined <- strain_purity %>%
   group_by(coassembly, gene, representative, sequence) %>%
@@ -163,7 +171,8 @@ strain_purity_combined <- strain_purity %>%
     num_sub_otus = n(),
     max_sub_otu_abundance = max(num_hits),
     ) %>%
-  ungroup()
+  ungroup() %>%
+  left_join(strain_purity_genomes)
 ```
 
 ```{r single-vs-coassembly}
@@ -550,8 +559,8 @@ ggsave(here(output_dir, "genome_size_vs_completeness.png"), dpi = 600, width = 1
 ### Strain Purity ###
 #####################
 strain_purity_data <- bind_rows(
-  strain_purity_separate %>% select(coassembly, gene, representative, total_num_reads, num_sub_otus, max_sub_otu_abundance) %>% mutate(assembly_set = "single"),
-  strain_purity_combined %>% select(coassembly, gene, representative, total_num_reads, num_sub_otus, max_sub_otu_abundance) %>% mutate(assembly_set = "coassembly"),
+  strain_purity_separate %>% select(coassembly, gene, representative, total_num_reads, num_sub_otus, max_sub_otu_abundance, genome) %>% mutate(assembly_set = "single"),
+  strain_purity_combined %>% select(coassembly, gene, representative, total_num_reads, num_sub_otus, max_sub_otu_abundance, genome) %>% mutate(assembly_set = "coassembly"),
   ) %>%
   mutate(
     assembly_set = factor(assembly_set, levels = assembly_set_levels),
@@ -562,10 +571,22 @@ strain_purity_plot <- strain_purity_data %>%
   ggplot(aes(assembly_set, centroid_prop, fill = assembly_set)) +
   strain_purity_layers +
   scale_fill_manual(breaks = assembly_set_levels, values = genome_set_values) +
+  ylim(0, 1.1) +
   geom_violin(linewidth = 0.5) +
   ylab("Centroid proportion of coverage")
 strain_purity_plot
 ggsave(here(output_dir, "centroid_prop.png"), dpi = 600, width = 12, height = 7)
+
+strain_purity_genome_plot <- strain_purity_data %>%
+  filter(!is.na(genome)) %>%
+  ggplot(aes(assembly_set, centroid_prop, fill = assembly_set)) +
+  strain_purity_layers +
+  scale_fill_manual(breaks = assembly_set_levels, values = genome_set_values) +
+  ylim(0, 1.1) +
+  geom_violin(linewidth = 0.5) +
+  ylab("Centroid proportion of coverage")
+strain_purity_genome_plot
+ggsave(here(output_dir, "centroid_genome_prop.png"), dpi = 600, width = 12, height = 7)
 
 strain_purity_abund <- strain_purity_data %>%
   ggplot(aes(total_num_reads, centroid_prop, colour = assembly_set)) +
@@ -586,6 +607,15 @@ strain_purity_data %>%
   )
 # 0.4% decrease in centroid proportion
 
+strain_purity_data %>%
+  filter(!is.na(genome)) %>%
+  group_by(assembly_set) %>%
+  summarise(
+    centroid_prop = mean(centroid_prop),
+    centroid_prop_sd = sd(centroid_prop),
+  )
+# 0.4% decrease in centroid proportion
+
 ##############################
 ### Combined strain purity ###
 ##############################
@@ -593,27 +623,28 @@ cowplot::plot_grid(
   genome_contigs + theme_cowplot(font_size = 7) + theme(legend.position = "none"),
   genome_size_adj + theme_cowplot(font_size = 7) + theme(legend.position = "none"),
   strain_purity_plot + theme_cowplot(font_size = 7) + theme(legend.position = "none"),
+  strain_purity_genome_plot + theme_cowplot(font_size = 7) + theme(legend.position = "none"),
   nrow = 2,
   labels = "auto", label_size = 10,
   align = "h", axis = "lrtb"
 )
 
-top_row <- cowplot::plot_grid(
-  genome_contigs + theme_cowplot(font_size = 7) + theme(legend.position = "none"),
-  genome_size_adj + theme_cowplot(font_size = 7) + theme(legend.position = "none"),
-  nrow = 1,
-  labels = "auto", label_size = 10,
-  align = "h", axis = "lrtb"
-)
+# top_row <- cowplot::plot_grid(
+#   genome_contigs + theme_cowplot(font_size = 7) + theme(legend.position = "none"),
+#   genome_size_adj + theme_cowplot(font_size = 7) + theme(legend.position = "none"),
+#   nrow = 1,
+#   labels = "auto", label_size = 10,
+#   align = "h", axis = "lrtb"
+# )
 
-bottom_row <- cowplot::plot_grid(
-  strain_purity_plot + theme_cowplot(font_size = 7) + theme(legend.position = "none"),
-  nrow = 1,
-  labels = c("c"), label_size = 10,
-  align = "h", axis = "lrtb"
-)
+# bottom_row <- cowplot::plot_grid(
+#   strain_purity_plot + theme_cowplot(font_size = 7) + theme(legend.position = "none"),
+#   nrow = 1,
+#   labels = c("c"), label_size = 10,
+#   align = "h", axis = "lrtb"
+# )
 
-cowplot::plot_grid(top_row, bottom_row, nrow = 2)
+# cowplot::plot_grid(top_row, bottom_row, nrow = 2)
 
 ggsave("strain_purity_comb.png", path = output_dir, dpi = 600, width = 180, height = 120, units = "mm")
 ggsave("strain_purity_comb.svg", path = output_dir, dpi = 600, width = 180, height = 120, units = "mm")

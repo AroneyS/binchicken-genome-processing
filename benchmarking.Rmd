@@ -474,6 +474,40 @@ genome_across %>%
     covered_improvement = mean(covered_improvement),
     gunc_improvement = mean(gunc_improvement),
   )
+
+genome_across %>%
+  filter(genome_set == "both") %>%
+  group_by(assembly_set, coassembly, representative) %>%
+  summarise(
+    quality = max(quality),
+    completeness = max(completeness),
+    contamination = min(contamination),
+    covered_fraction = max(covered_fraction),
+    pass.GUNC = any(pass.GUNC),
+    ) %>%
+  pivot_wider(names_from = assembly_set, values_from = quality:pass.GUNC) %>%
+  ungroup() %>%
+  summarise(
+    quality_single_sd = sd(quality_single),
+    quality_single = mean(quality_single),
+    quality_coassembly_sd = sd(quality_coassembly),
+    quality_coassembly = mean(quality_coassembly),
+    completeness_single_sd = sd(completeness_single),
+    completeness_single = mean(completeness_single),
+    completeness_coassembly_sd = sd(completeness_coassembly),
+    completeness_coassembly = mean(completeness_coassembly),
+    contamination_single_sd = sd(contamination_single),
+    contamination_single = mean(contamination_single),
+    contamination_coassembly_sd = sd(contamination_coassembly),
+    contamination_coassembly = mean(contamination_coassembly),
+    covered_single_sd = sd(covered_fraction_single),
+    covered_single = mean(covered_fraction_single),
+    covered_coassembly_sd = sd(covered_fraction_coassembly),
+    covered_coassembly = mean(covered_fraction_coassembly),
+    gunc_single = sum(pass.GUNC_single),
+    gunc_coassembly = sum(pass.GUNC_coassembly),
+  ) %>%
+  pivot_longer(cols = everything())
 ```
 
 ```{r strain-purity}

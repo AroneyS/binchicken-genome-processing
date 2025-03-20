@@ -2326,11 +2326,42 @@ novel_proteins <- bc_non_singletons %>%
   ggplot(aes(reorder(novelty, n), n)) +
   geom_col() +
   coord_flip() +
-  scale_y_continuous("Count") +
+  scale_y_continuous("Count", labels = ~ format(.x, scientific = FALSE)) +
   scale_x_discrete("Novelty") +
   theme_cowplot()
 novel_proteins
 ggsave("novel_proteins.png", path = output_dir, dpi = 600, height = 7, width = 12)
+
+cog_categories <- tribble(
+  ~COG_category, ~Description, ~Short_Description,
+  "A", "RNA processing and modification", "RNA (A)",
+  "B", "Chromatin structure and dynamics", "Chromatin (B)",
+  "C", "Energy production and conversion", "Energy (C)",
+  "D", "Cell cycle control, cell division, chromosome partitioning", "Cell cycle (D)",
+  "E", "Amino acid transport and metabolism", "Amino acid (E)",
+  "F", "Nucleotide transport and metabolism", "Nucleotide (F)",
+  "G", "Carbohydrate transport and metabolism", "Carbohydrate (G)",
+  "H", "Coenzyme transport and metabolism", "Coenzyme (H)",
+  "I", "Lipid transport and metabolism", "Lipid (I)",
+  "J", "Translation, ribosomal structure and biogenesis", "Translation (J)",
+  "K", "Transcription", "Transcription (K)",
+  "L", "Replication, recombination and repair", "Replication (L)",
+  "M", "Cell wall/membrane/envelope biogenesis", "Cell wall (M)",
+  "N", "Cell motility", "Cell motility (N)",
+  "O", "Posttranslational modification, protein turnover, chaperones", "Posttranslational (O)",
+  "P", "Inorganic ion transport and metabolism", "Inorganic ion (P)",
+  "Q", "Secondary metabolites biosynthesis, transport and catabolism", "Secondary metabolites (Q)",
+  "R", "General function prediction only", "General (R)",
+  "S", "Function unknown", "Unknown (S)",
+  "T", "Signal transduction mechanisms", "Signal transduction (T)",
+  "U", "Intracellular trafficking, secretion, and vesicular transport", "Intracellular trafficking (U)",
+  "V", "Defense mechanisms", "Defense (V)",
+  "W", "Extracellular structures", "Extracellular (W)",
+  "X", "nan", "nan (X)",
+  "Y", "Nuclear structure", "Nuclear (Y)",
+  "Z", "Cytoskeleton", "Cytoskeleton (Z)",
+  "NU", "Cell motility and/or Intracellular trafficking, secretion, and vesicular transport", "Motility / Trafficking (NU)",
+)
 
 novel_cogs <- bc_non_singletons %>%
   replace_na(list(COG_category = "-")) %>%
@@ -2340,7 +2371,8 @@ novel_cogs <- bc_non_singletons %>%
   count() %>%
   arrange(desc(n)) %>%
   head(20) %>%
-  ggplot(aes(reorder(COG_category, n), n)) +
+  left_join(cog_categories, by = "COG_category") %>%
+  ggplot(aes(reorder(Short_Description, n), n)) +
   geom_col() +
   coord_flip() +
   scale_y_continuous("Count") +
@@ -2366,6 +2398,38 @@ novel_name <- bc_non_singletons %>%
 novel_name
 ggsave("novel_name.png", path = output_dir, dpi = 600, height = 7, width = 12)
 
+kegg_labels <- tribble(
+  ~KEGG_ko, ~KEGG_label,
+  "ko:K03088", "rpoE (K03088)",
+  "ko:K01992", "ABC permease protein (K01992)",
+  "ko:K01990", "ABC ATP binding (K01990)",
+  "ko:K02004", "ABC permease protein (K02004)",
+  "ko:K12132", "Serine/threonine kinase (K12132)",
+  "ko:K03406", "Methyl-accepting chemotaxis (K03406)",
+  "ko:K06147", "ABC subfamily B (K06147)",
+  "ko:K02003", "ABC ATP binding (K02003)",
+  "ko:K02035", "ABC substrate binding (K02035)",
+  "ko:K02014", "Iron complex outer membrane (K02014)",
+  "ko:K01768", "Adenylate cyclase (K01768)",
+  "ko:K03687", "Chaperone grpE (K03687)",
+  "ko:K07090", "Uncharacterised (K07090)",
+  "ko:K01869", "Leucyl-tRNA synthase (K01869)",
+  "ko:K02529", "Galactose operon repressor (K02529)",
+  "ko:K03046", "rpoC (K03046)",
+  "ko:K07052", "CAAX protease (K07052)",
+  "ko:K07114", "Ca-activ. chloride channel (K07114)",
+  "ko:K03043", "rpoB (K03043)",
+  "ko:K01873", "Valyl-tRNA synthase (K01873)",
+  "ko:K03657", "ATP-dep. DNA helicase (K03657)",
+  "ko:K02238", "Competence protein ComEC (K02238)",
+  "ko:K03797", "Carboxyl-terminal protease (K03797)",
+  "ko:K00059", "3-oxoacyl reductase (K00059)",
+  "ko:K04771", "Serine protease Do (K04771)",
+  "ko:K03086", "rpoD (K03086)",
+  "ko:K13993", "HSP20 family protein (K13993)",
+  "ko:K03100", "Signal peptidase I (K03100)",
+)
+
 novel_ko <- bc_non_singletons %>%
   replace_na(list(KEGG_ko = "-")) %>%
   mutate(KEGG_ko = ifelse(KEGG_ko == "-", "Unknown", KEGG_ko)) %>%
@@ -2374,7 +2438,8 @@ novel_ko <- bc_non_singletons %>%
   count() %>%
   arrange(desc(n)) %>%
   head(20) %>%
-  ggplot(aes(reorder(KEGG_ko, n), n)) +
+  left_join(kegg_labels, by = "KEGG_ko") %>%
+  ggplot(aes(reorder(KEGG_label, n), n)) +
   geom_col() +
   coord_flip() +
   scale_y_continuous("Count") +
@@ -2514,6 +2579,7 @@ novel_genome_metadata <- genome_metadata %>%
 # Phylum
 novel_genome_metadata %>%
   filter(!is.na(novel_phylum)) %>%
+  group_by(domain, novel_phylum, rep) %>% count() %>%
   group_by(domain, novel_phylum) %>%
   count() %>% 
   filter(n > 1) %>% 
@@ -2523,6 +2589,7 @@ novel_genome_metadata %>%
 # Class
 novel_genome_metadata %>%
   filter(!is.na(novel_class)) %>%
+  group_by(domain, novel_class, rep) %>% count() %>%
   group_by(domain, novel_class) %>%
   count() %>% 
   filter(n > 1) %>% 
@@ -2532,6 +2599,7 @@ novel_genome_metadata %>%
 # Order
 novel_genome_metadata %>%
   filter(!is.na(novel_order)) %>%
+  group_by(domain, novel_order, rep) %>% count() %>%
   group_by(domain, novel_order) %>%
   count() %>% 
   filter(n > 1) %>% 
@@ -2541,6 +2609,7 @@ novel_genome_metadata %>%
 # Family
 novel_genome_metadata %>%
   filter(!is.na(novel_family)) %>%
+  group_by(domain, novel_family, rep) %>% count() %>%
   group_by(domain, novel_family) %>%
   count() %>% 
   filter(n > 1) %>% 
@@ -2550,6 +2619,7 @@ novel_genome_metadata %>%
 # Genus
 novel_genome_metadata %>%
   filter(!is.na(novel_genus)) %>%
+  group_by(domain, novel_genus, rep) %>% count() %>%
   group_by(domain, novel_genus) %>%
   count() %>% 
   filter(n > 1) %>% 

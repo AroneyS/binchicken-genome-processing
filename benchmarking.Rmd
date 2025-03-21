@@ -522,6 +522,91 @@ strain_purity_layers <- list(
   theme(legend.position = "None")
 )
 
+genome_across_adj <- genome_across %>%
+  filter(genome_set == "both") %>%
+  mutate(genome_size_adj = genome_size / (completeness / 100) / (1 + contamination / 100)) %>%
+  group_by(assembly_set, coassembly, representative) %>%
+  summarise(
+    genome_size_adj = min(genome_size_adj),
+    completeness = max(completeness),
+    contamination = min(contamination),
+    )
+
+strain_purity_data <- bind_rows(
+  strain_purity_separate %>% select(coassembly, gene, representative, total_num_reads, num_sub_otus, max_sub_otu_abundance, genome) %>% mutate(assembly_set = "single"),
+  strain_purity_combined %>% select(coassembly, gene, representative, total_num_reads, num_sub_otus, max_sub_otu_abundance, genome) %>% mutate(assembly_set = "coassembly"),
+  ) %>%
+  mutate(
+    assembly_set = factor(assembly_set, levels = assembly_set_levels),
+    centroid_prop = max_sub_otu_abundance / total_num_reads,
+    )
+
+purity_stats <- bind_rows(
+  # Contigs total
+  genome_across %>%
+    filter(genome_set == "both") %>%
+    group_by(assembly_set, coassembly, representative) %>%
+    summarise(n = min(contigs_total)) %>%
+    rename(genome_set = assembly_set) %>%
+    mutate(group = "contigs_both") %>%
+    group_by(group) %>%
+    nest(),
+  # Genome adjusted size
+  genome_across_adj %>%
+    select(genome_set = assembly_set, coassembly, representative, n = genome_size_adj) %>%
+    mutate(group = "adj_size_both") %>%
+    group_by(group) %>%
+    nest(),
+  # Coassembly centroid proportion of coverage
+  strain_purity_data %>%
+    group_by(assembly_set, coassembly) %>%
+    summarise(n = mean(centroid_prop)) %>%
+    rename(genome_set = assembly_set) %>%
+    mutate(group = "centroid_coassembly") %>%
+    group_by(group) %>%
+    nest(),
+  # Genome centroid proportion of coverage
+  strain_purity_data %>%
+    filter(!is.na(genome)) %>%
+    group_by(assembly_set, coassembly, genome) %>%
+    summarise(n = mean(centroid_prop)) %>%
+    rename(genome_set = assembly_set, representative = genome) %>%
+    mutate(group = "centroid_both") %>%
+    group_by(group) %>%
+    nest(),
+  ) %>%
+  mutate(
+    # Base model fit
+    base_fit = map2(group, data, ~ {
+      if (.x %in% c("contigs_both", "adj_size_both", "centroid_both")) lm(n ~ 1 + representative, data = .y)
+      else lm(n ~ 1 + coassembly, data = .y)
+      }),
+    # Test model fit
+    fit = map2(group, data, ~ {
+      if (.x %in% c("contigs_both", "adj_size_both", "centroid_both")) lm(n ~ genome_set + representative, data = .y)
+      else lm(n ~ genome_set + coassembly, data = .y)
+      }),
+    # Model comparison
+    tidy = map(fit, broom::tidy),
+    anova = map2(base_fit, fit, anova),
+    # Significance calculation
+    raw_pval = map_dbl(anova, ~ .x %>% broom::tidy() %>% slice(2) %>% pull(p.value)),
+    pval = p.adjust(raw_pval, method = "fdr"),
+    sig = pval < 0.05,
+    label = map_chr(pval, signif_stars),
+    # For plotting
+    genome_set = "single",
+    assembly_set = "single",
+    y = case_when(
+      str_detect(group, "contigs") ~ 1800,
+      str_detect(group, "adj_size") ~ 12000000,
+      str_detect(group, "centroid_coassembly") ~ 1.15,
+      str_detect(group, "centroid_both") ~ 1.15,
+      ),
+    xmin = "single",
+    xmax = "coassembly",
+  )
+
 ####################
 ### # of contigs ###
 ####################
@@ -531,6 +616,10 @@ genome_contigs <- genome_across %>%
   summarise(contigs_total = min(contigs_total)) %>%
   ggplot(aes(assembly_set, contigs_total, fill = assembly_set)) +
   strain_purity_layers +
+  geom_signif(
+    aes(xmin = xmin, xmax = xmax, annotations = label, y_position = y),
+    data = purity_stats %>% filter(group == "contigs_both"), manual = TRUE, textsize = 3
+    ) +
   ylab("Total contigs")
 genome_contigs
 ggsave(here(output_dir, "contigs_total.png"), dpi = 600, width = 12, height = 7)
@@ -546,19 +635,13 @@ genome_across %>%
 ##########################################
 ### Completeness-estimated genome size ###
 ##########################################
-genome_across_adj <- genome_across %>%
-  filter(genome_set == "both") %>%
-  mutate(genome_size_adj = genome_size / (completeness / 100) / (1 + contamination / 100)) %>%
-  group_by(assembly_set, coassembly, representative) %>%
-  summarise(
-    genome_size_adj = min(genome_size_adj),
-    completeness = max(completeness),
-    contamination = min(contamination),
-    )
-
 genome_size_adj <- genome_across_adj %>%
   ggplot(aes(assembly_set, genome_size_adj, fill = assembly_set)) +
   strain_purity_layers +
+  geom_signif(
+    aes(xmin = xmin, xmax = xmax, annotations = label, y_position = y),
+    data = purity_stats %>% filter(group == "adj_size_both"), manual = TRUE, textsize = 3
+    ) +
   ylab("Adjusted Genome size (bp)")
 genome_size_adj
 ggsave(here(output_dir, "genome_size_completeness.png"), dpi = 600, width = 12, height = 7)
@@ -592,21 +675,21 @@ ggsave(here(output_dir, "genome_size_vs_completeness.png"), dpi = 600, width = 1
 #####################
 ### Strain Purity ###
 #####################
-strain_purity_data <- bind_rows(
-  strain_purity_separate %>% select(coassembly, gene, representative, total_num_reads, num_sub_otus, max_sub_otu_abundance, genome) %>% mutate(assembly_set = "single"),
-  strain_purity_combined %>% select(coassembly, gene, representative, total_num_reads, num_sub_otus, max_sub_otu_abundance, genome) %>% mutate(assembly_set = "coassembly"),
-  ) %>%
-  mutate(
-    assembly_set = factor(assembly_set, levels = assembly_set_levels),
-    centroid_prop = max_sub_otu_abundance / total_num_reads,
-    )
-
 strain_purity_plot <- strain_purity_data %>%
   ggplot(aes(assembly_set, centroid_prop, fill = assembly_set)) +
   strain_purity_layers +
   scale_fill_manual(breaks = assembly_set_levels, values = genome_set_values) +
   ylim(0, 1.1) +
   geom_violin(linewidth = 0.5) +
+  geom_signif(
+    aes(xmin = xmin, xmax = xmax, annotations = label, y_position = y),
+    data = purity_stats %>% filter(group == "centroid_coassembly"), manual = TRUE, textsize = 3
+    ) +
+  scale_y_continuous(
+    expand = expansion(mult = c(0, 0.05)),
+    limits = c(0, 125) / 100,
+    breaks = seq(0, 100, 25) / 100
+    ) +
   ylab("Centroid proportion of coverage")
 strain_purity_plot
 ggsave(here(output_dir, "centroid_prop.png"), dpi = 600, width = 12, height = 7)
@@ -618,6 +701,15 @@ strain_purity_genome_plot <- strain_purity_data %>%
   scale_fill_manual(breaks = assembly_set_levels, values = genome_set_values) +
   ylim(0, 1.1) +
   geom_violin(linewidth = 0.5) +
+  geom_signif(
+    aes(xmin = xmin, xmax = xmax, annotations = label, y_position = y),
+    data = purity_stats %>% filter(group == "centroid_both"), manual = TRUE, textsize = 3
+    ) +
+  scale_y_continuous(
+    expand = expansion(mult = c(0, 0.05)),
+    limits = c(0, 125) / 100,
+    breaks = seq(0, 100, 25) / 100
+    ) +
   ylab("Centroid proportion of coverage")
 strain_purity_genome_plot
 ggsave(here(output_dir, "centroid_genome_prop.png"), dpi = 600, width = 12, height = 7)

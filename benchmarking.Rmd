@@ -530,6 +530,7 @@ genome_across_adj <- genome_across %>%
     genome_size_adj = min(genome_size_adj),
     completeness = max(completeness),
     contamination = min(contamination),
+    trimmed_mean_coverage = max(trimmed_mean_coverage),
     )
 
 strain_purity_data <- bind_rows(
@@ -607,6 +608,75 @@ purity_stats <- bind_rows(
     xmax = "coassembly",
   )
 
+purity_stats_stratified <- bind_rows(
+  # Contigs total
+  genome_across %>%
+    filter(genome_set == "both") %>%
+    mutate(
+      coverage_factor = case_when(
+        trimmed_mean_coverage < 5 ~ "<5",
+        trimmed_mean_coverage < 10 ~ "<10",
+        trimmed_mean_coverage < 20 ~ "<20",
+        trimmed_mean_coverage < 50 ~ "<50",
+        TRUE ~ ">=50"
+        ),
+      coverage_factor = factor(coverage_factor, levels = c("<5", "<10", "<20", "<50", ">=50")),
+      ) %>%
+    group_by(assembly_set, coassembly, representative, coverage_factor) %>%
+    summarise(n = min(contigs_total)) %>%
+    rename(genome_set = assembly_set) %>%
+    mutate(group = "contigs_both") %>%
+    group_by(group, coverage_factor) %>%
+    nest(),
+  # Genome adjusted size
+  genome_across_adj %>%
+    mutate(
+      coverage_factor = case_when(
+        trimmed_mean_coverage < 5 ~ "<5",
+        trimmed_mean_coverage < 10 ~ "<10",
+        trimmed_mean_coverage < 20 ~ "<20",
+        trimmed_mean_coverage < 50 ~ "<50",
+        TRUE ~ ">=50"
+        ),
+      coverage_factor = factor(coverage_factor, levels = c("<5", "<10", "<20", "<50", ">=50")),
+      ) %>%
+    select(genome_set = assembly_set, coassembly, representative, coverage_factor, n = genome_size_adj) %>%
+    mutate(group = "adj_size_both") %>%
+    group_by(group, coverage_factor) %>%
+    nest(),
+  ) %>%
+  mutate(
+    # Base model fit
+    base_fit = map2(group, data, ~ {
+      if (.x %in% c("contigs_both", "adj_size_both", "centroid_both")) lm(n ~ 1 + representative, data = .y)
+      else lm(n ~ 1 + coassembly, data = .y)
+      }),
+    # Test model fit
+    fit = map2(group, data, ~ {
+      if (.x %in% c("contigs_both", "adj_size_both", "centroid_both")) lm(n ~ genome_set + representative, data = .y)
+      else lm(n ~ genome_set + coassembly, data = .y)
+      }),
+    # Model comparison
+    tidy = map(fit, broom::tidy),
+    anova = map2(base_fit, fit, anova),
+    # Significance calculation
+    raw_pval = map_dbl(anova, ~ .x %>% broom::tidy() %>% slice(2) %>% pull(p.value)),
+    pval = p.adjust(raw_pval, method = "fdr"),
+    sig = pval < 0.05,
+    label = map_chr(pval, signif_stars),
+    # For plotting
+    genome_set = "single",
+    assembly_set = "single",
+    y = case_when(
+      str_detect(group, "contigs") ~ 1800,
+      str_detect(group, "adj_size") ~ 12000000,
+      str_detect(group, "centroid_coassembly") ~ 1.15,
+      str_detect(group, "centroid_both") ~ 1.15,
+      ),
+    xmin = "single",
+    xmax = "coassembly",
+  )
+
 ####################
 ### # of contigs ###
 ####################
@@ -631,6 +701,34 @@ genome_across %>%
   group_by(assembly_set) %>%
   summarise(contigs_total = mean(contigs_total))
 # 18% reduction in contig counts
+
+genome_contigs_stratified <- genome_across %>%
+  filter(genome_set == "both") %>%
+  group_by(assembly_set, coassembly, representative) %>%
+  summarise(
+    contigs_total = min(contigs_total),
+    trimmed_mean_coverage = max(trimmed_mean_coverage),
+    ) %>%
+  mutate(
+    coverage_factor = case_when(
+      trimmed_mean_coverage < 5 ~ "<5",
+      trimmed_mean_coverage < 10 ~ "<10",
+      trimmed_mean_coverage < 20 ~ "<20",
+      trimmed_mean_coverage < 50 ~ "<50",
+      TRUE ~ ">=50"
+      ),
+    coverage_factor = factor(coverage_factor, levels = c("<5", "<10", "<20", "<50", ">=50")),
+    ) %>%
+  ggplot(aes(assembly_set, contigs_total, fill = assembly_set)) +
+  strain_purity_layers +
+  facet_grid(~ coverage_factor) +
+  geom_signif(
+    aes(xmin = xmin, xmax = xmax, annotations = label, y_position = y),
+    data = purity_stats_stratified %>% filter(group == "contigs_both"), manual = TRUE, textsize = 3
+    ) +
+  ylab("Total contigs")
+genome_contigs_stratified
+ggsave(here(output_dir, "contigs_stratified.png"), dpi = 600, width = 12, height = 7)
 
 ##########################################
 ### Completeness-estimated genome size ###
@@ -671,6 +769,28 @@ genome_size_adj_comp <- genome_across_adj %>%
   theme_cowplot()
 genome_size_adj_comp
 ggsave(here(output_dir, "genome_size_vs_completeness.png"), dpi = 600, width = 12, height = 7)
+
+genome_size_adj_stratified <- genome_across_adj %>%
+  mutate(
+    coverage_factor = case_when(
+      trimmed_mean_coverage < 5 ~ "<5",
+      trimmed_mean_coverage < 10 ~ "<10",
+      trimmed_mean_coverage < 20 ~ "<20",
+      trimmed_mean_coverage < 50 ~ "<50",
+      TRUE ~ ">=50"
+      ),
+    coverage_factor = factor(coverage_factor, levels = c("<5", "<10", "<20", "<50", ">=50")),
+    ) %>%
+  ggplot(aes(assembly_set, genome_size_adj, fill = assembly_set)) +
+  strain_purity_layers +
+  facet_grid(~ coverage_factor) +
+  geom_signif(
+    aes(xmin = xmin, xmax = xmax, annotations = label, y_position = y),
+    data = purity_stats_stratified %>% filter(group == "adj_size_both"), manual = TRUE, textsize = 3
+    ) +
+  ylab("Adjusted Genome size (bp)")
+genome_size_adj_stratified
+ggsave(here(output_dir, "genome_size_stratified.png"), dpi = 600, width = 12, height = 7)
 
 #####################
 ### Strain Purity ###
@@ -755,25 +875,19 @@ cowplot::plot_grid(
   align = "h", axis = "lrtb"
 )
 
-# top_row <- cowplot::plot_grid(
-#   genome_contigs + theme_cowplot(font_size = 7) + theme(legend.position = "none"),
-#   genome_size_adj + theme_cowplot(font_size = 7) + theme(legend.position = "none"),
-#   nrow = 1,
-#   labels = "auto", label_size = 10,
-#   align = "h", axis = "lrtb"
-# )
-
-# bottom_row <- cowplot::plot_grid(
-#   strain_purity_plot + theme_cowplot(font_size = 7) + theme(legend.position = "none"),
-#   nrow = 1,
-#   labels = c("c"), label_size = 10,
-#   align = "h", axis = "lrtb"
-# )
-
-# cowplot::plot_grid(top_row, bottom_row, nrow = 2)
-
 ggsave("strain_purity_comb.png", path = output_dir, dpi = 600, width = 180, height = 120, units = "mm")
 ggsave("strain_purity_comb.svg", path = output_dir, dpi = 600, width = 180, height = 120, units = "mm")
+
+cowplot::plot_grid(
+  genome_contigs_stratified + theme_cowplot(font_size = 7) + theme(legend.position = "none"),
+  genome_size_adj_stratified + theme_cowplot(font_size = 7) + theme(legend.position = "none"),
+  nrow = 2,
+  labels = "auto", label_size = 10,
+  align = "h", axis = "lrtb"
+)
+
+ggsave("strain_purity_stratified.png", path = output_dir, dpi = 600, width = 180, height = 120, units = "mm")
+ggsave("strain_purity_stratified.svg", path = output_dir, dpi = 600, width = 180, height = 120, units = "mm")
 ```
 
 ```{r binchicken-vs-sourmash}

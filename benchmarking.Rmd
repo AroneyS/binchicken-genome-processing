@@ -958,6 +958,42 @@ computational_benchmarks %>%
   theme_cowplot()
 ggsave(here(output_dir, "computational_cluster.png"), dpi = 600, width = 12, height = 7)
 
+computational_benchmarks %>%
+  group_by(project) %>%
+  summarise(samples = first(samples)) %>%
+  summarise(min = min(samples), max = max(samples), median = median(samples), sum = sum(samples))
+
+computational_benchmarks %>%
+  group_by(project) %>%
+  summarise(cpu_time = sum(cpu_time)) %>%
+  summarise(
+    sum = sum(cpu_time) / 60,
+    median = median(cpu_time) / 60,
+    max = max(cpu_time) / 60,
+    min = min(cpu_time) / 60,
+    )
+
+computational_benchmarks %>%
+  mutate(stage = ifelse(stage == "appraise", "Reference genome appraisal", "Sample clustering")) %>%
+  group_by(project, samples, stage) %>%
+  summarise(
+    cpu_time = sum(cpu_time),
+    max_rss = max(max_rss),
+    ) %>%
+  group_by(stage) %>%
+  summarise(
+    sum = sum(cpu_time) / 60,
+    median = median(cpu_time) / 60,
+    max = max(cpu_time) / 60,
+    min = min(cpu_time) / 60,
+    median_mem = median(max_rss),
+    max_mem = max(max_rss),
+    min_mem = min(max_rss),
+    )
+
+#########################################
+### Assembly runtime and memory usage ###
+#########################################
 assembly_runtime %>%
   ggplot(aes(total_size / 10 ** 9, max_rss / 10 ** 3, colour = assembler)) +
   geom_point() +

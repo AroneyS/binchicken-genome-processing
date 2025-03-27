@@ -614,13 +614,13 @@ purity_stats_stratified <- bind_rows(
     filter(genome_set == "both") %>%
     mutate(
       coverage_factor = case_when(
-        trimmed_mean_coverage < 5 ~ "<5",
-        trimmed_mean_coverage < 10 ~ "<10",
-        trimmed_mean_coverage < 20 ~ "<20",
-        trimmed_mean_coverage < 50 ~ "<50",
-        TRUE ~ ">=50"
+        trimmed_mean_coverage < 5 ~ "0-5X",
+        trimmed_mean_coverage < 10 ~ "5-10X",
+        trimmed_mean_coverage < 20 ~ "10-20X",
+        trimmed_mean_coverage < 50 ~ "20-50X",
+        TRUE ~ ">=50X"
         ),
-      coverage_factor = factor(coverage_factor, levels = c("<5", "<10", "<20", "<50", ">=50")),
+      coverage_factor = factor(coverage_factor, levels = c("0-5X", "5-10X", "10-20X", "20-50X", ">=50X")),
       ) %>%
     group_by(assembly_set, coassembly, representative, coverage_factor) %>%
     summarise(n = min(contigs_total)) %>%
@@ -632,13 +632,13 @@ purity_stats_stratified <- bind_rows(
   genome_across_adj %>%
     mutate(
       coverage_factor = case_when(
-        trimmed_mean_coverage < 5 ~ "<5",
-        trimmed_mean_coverage < 10 ~ "<10",
-        trimmed_mean_coverage < 20 ~ "<20",
-        trimmed_mean_coverage < 50 ~ "<50",
-        TRUE ~ ">=50"
+        trimmed_mean_coverage < 5 ~ "0-5X",
+        trimmed_mean_coverage < 10 ~ "5-10X",
+        trimmed_mean_coverage < 20 ~ "10-20X",
+        trimmed_mean_coverage < 50 ~ "20-50X",
+        TRUE ~ ">=50X"
         ),
-      coverage_factor = factor(coverage_factor, levels = c("<5", "<10", "<20", "<50", ">=50")),
+      coverage_factor = factor(coverage_factor, levels = c("0-5X", "5-10X", "10-20X", "20-50X", ">=50X")),
       ) %>%
     select(genome_set = assembly_set, coassembly, representative, coverage_factor, n = genome_size_adj) %>%
     mutate(group = "adj_size_both") %>%
@@ -711,13 +711,13 @@ genome_contigs_stratified <- genome_across %>%
     ) %>%
   mutate(
     coverage_factor = case_when(
-      trimmed_mean_coverage < 5 ~ "<5",
-      trimmed_mean_coverage < 10 ~ "<10",
-      trimmed_mean_coverage < 20 ~ "<20",
-      trimmed_mean_coverage < 50 ~ "<50",
-      TRUE ~ ">=50"
+      trimmed_mean_coverage < 5 ~ "0-5X",
+      trimmed_mean_coverage < 10 ~ "5-10X",
+      trimmed_mean_coverage < 20 ~ "10-20X",
+      trimmed_mean_coverage < 50 ~ "20-50X",
+      TRUE ~ ">=50X"
       ),
-    coverage_factor = factor(coverage_factor, levels = c("<5", "<10", "<20", "<50", ">=50")),
+    coverage_factor = factor(coverage_factor, levels = c("0-5X", "5-10X", "10-20X", "20-50X", ">=50X")),
     ) %>%
   ggplot(aes(assembly_set, contigs_total, fill = assembly_set)) +
   strain_purity_layers +
@@ -773,13 +773,13 @@ ggsave(here(output_dir, "genome_size_vs_completeness.png"), dpi = 600, width = 1
 genome_size_adj_stratified <- genome_across_adj %>%
   mutate(
     coverage_factor = case_when(
-      trimmed_mean_coverage < 5 ~ "<5",
-      trimmed_mean_coverage < 10 ~ "<10",
-      trimmed_mean_coverage < 20 ~ "<20",
-      trimmed_mean_coverage < 50 ~ "<50",
-      TRUE ~ ">=50"
+      trimmed_mean_coverage < 5 ~ "0-5X",
+      trimmed_mean_coverage < 10 ~ "5-10X",
+      trimmed_mean_coverage < 20 ~ "10-20X",
+      trimmed_mean_coverage < 50 ~ "20-50X",
+      TRUE ~ ">=50X"
       ),
-    coverage_factor = factor(coverage_factor, levels = c("<5", "<10", "<20", "<50", ">=50")),
+    coverage_factor = factor(coverage_factor, levels = c("0-5X", "5-10X", "10-20X", "20-50X", ">=50X")),
     ) %>%
   ggplot(aes(assembly_set, genome_size_adj, fill = assembly_set)) +
   strain_purity_layers +
@@ -810,7 +810,7 @@ strain_purity_plot <- strain_purity_data %>%
     limits = c(0, 125) / 100,
     breaks = seq(0, 100, 25) / 100
     ) +
-  ylab("Centroid proportion of coverage")
+  ylab("Centroid proportion of coverage\n(strain purity)")
 strain_purity_plot
 ggsave(here(output_dir, "centroid_prop.png"), dpi = 600, width = 12, height = 7)
 
@@ -830,7 +830,7 @@ strain_purity_genome_plot <- strain_purity_data %>%
     limits = c(0, 125) / 100,
     breaks = seq(0, 100, 25) / 100
     ) +
-  ylab("Centroid proportion of coverage")
+  ylab("Centroid proportion of coverage\n(strain purity)")
 strain_purity_genome_plot
 ggsave(here(output_dir, "centroid_genome_prop.png"), dpi = 600, width = 12, height = 7)
 
@@ -840,7 +840,7 @@ strain_purity_abund <- strain_purity_data %>%
   geom_point() +
   geom_smooth(method = "lm", se = FALSE) +
   xlab("Total number of reads") +
-  ylab("Centroid proportion of coverage") +
+  ylab("Centroid proportion of coverage\n(strain purity)") +
   theme_cowplot()
 strain_purity_abund
 ggsave(here(output_dir, "centroid_vs_abund.png"), dpi = 600, width = 12, height = 7)
@@ -883,7 +883,7 @@ cowplot::plot_grid(
   genome_size_adj_stratified + theme_cowplot(font_size = 7) + theme(legend.position = "none"),
   nrow = 2,
   labels = "auto", label_size = 10,
-  align = "h", axis = "lrtb"
+  align = "v", axis = "lrtb"
 )
 
 ggsave("strain_purity_stratified.png", path = output_dir, dpi = 600, width = 180, height = 120, units = "mm")

@@ -77,6 +77,8 @@ genome_metadata <- bind_rows(
   left_join(combined_gunc %>% select(name, pass.GUNC))
 
 computational_benchmarks <- read_tsv(here("data", "computational_benchmarks.tsv"))
+genome_benchmarks <- read_tsv(here("data", "genome_benchmarks.tsv"))
+demo_benchmarks <- read_tsv(here("data", "demo_benchmarks.tsv"))
 
 across_representatives <- genome_metadata %>%
   distinct(representative, coassembly, genome_set) %>%
@@ -926,6 +928,9 @@ ggsave(here(output_dir, "binchicken_vs_sourmash_combined.png"), dpi = 600, width
 ```
 
 ```{r computational-benchmarks}
+################################
+### Computational benchmarks ###
+################################
 computational_benchmarks %>%
   mutate(stage = ifelse(stage == "appraise", "Reference genome appraisal", "Sample clustering")) %>%
   group_by(project, samples, stage) %>%
@@ -990,6 +995,29 @@ computational_benchmarks %>%
     max_mem = max(max_rss),
     min_mem = min(max_rss),
     )
+
+#########################
+### Genome benchmarks ###
+#########################
+genome_benchmarks %>%
+  summarise(
+    s = sum(s) / 60 / 60,
+    cpu_sum = sum(cpu_time) / 60 / 60,
+    median_rss = median(max_rss),
+    max_rss = max(max_rss),
+    cpu_median = median(cpu_time),
+    cpu_max = max(cpu_time),
+  )
+
+#######################
+### Demo benchmarks ###
+#######################
+demo_benchmarks %>%
+  summarise(
+    s = sum(s) / 60 / 60,
+    cpu_time = sum(cpu_time) / 60 / 60,
+    max_rss = max(max_rss) / 10 ** 3,
+  )
 
 #########################################
 ### Assembly runtime and memory usage ###

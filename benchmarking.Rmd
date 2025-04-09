@@ -76,6 +76,26 @@ genome_metadata <- bind_rows(
   left_join(combined_clusters, by = c("name" = "genome")) %>%
   left_join(combined_gunc %>% select(name, pass.GUNC))
 
+single_binning_clusters <- read_tsv(here("binchicken_RBGs", "metadata", "benchmarking_clusters_single_binning.tsv"), col_names = c("representative", "genome")) %>%
+  mutate(
+    representative = representative %>% str_remove(".*/") %>% str_remove(".fna"),
+    genome = genome %>% str_remove(".*/") %>% str_remove(".fna"),
+  )
+single_binning_metadata <- bind_rows(
+    genome_metadata %>%
+      select(genome_set, coassembly, subset, name),
+    single_binning_clusters %>%
+      filter(str_detect(genome, "ss")) %>%
+      mutate(
+        genome_set = "single_binning",
+        coassembly = str_extract(genome, "^[^_]+_co[^_]+"),
+        subset = str_extract(genome, "^[^_]+_co[^_]+_[^_]+"),
+        name = genome,
+        ) %>%
+      select(genome_set, coassembly, subset, name)
+  ) %>%
+  left_join(single_binning_clusters, by = c("name" = "genome"))
+
 computational_benchmarks <- read_tsv(here("data", "computational_benchmarks.tsv"))
 genome_benchmarks <- read_tsv(here("data", "genome_benchmarks.tsv"))
 vs_benchmarks <- read_tsv(here("data", "vs_benchmarks.tsv"))
@@ -511,6 +531,88 @@ genome_across %>%
     gunc_coassembly = sum(pass.GUNC_coassembly),
   ) %>%
   pivot_longer(cols = everything())
+```
+
+```{r single-vs-coassembly-vs-single-binning}
+single_binning_stats <- bind_rows(
+  # Species counts
+  single_binning_metadata %>%
+    filter(genome_set != "coassembly") %>%
+    distinct(genome_set, coassembly, representative) %>%
+    group_by(genome_set, coassembly) %>%
+    count() %>%
+    mutate(group = "ss_sm") %>%
+    group_by(group) %>%
+    nest(),
+  single_binning_metadata %>%
+    filter(genome_set != "single") %>%
+    distinct(genome_set, coassembly, representative) %>%
+    group_by(genome_set, coassembly) %>%
+    count() %>%
+    mutate(group = "ss_mm") %>%
+    group_by(group) %>%
+    nest(),
+  single_binning_metadata %>%
+    filter(genome_set != "single_binning") %>%
+    distinct(genome_set, coassembly, representative) %>%
+    group_by(genome_set, coassembly) %>%
+    count() %>%
+    mutate(group = "sm_mm") %>%
+    group_by(group) %>%
+    nest(),
+  ) %>%
+  mutate(
+    # Base model fit
+    base_fit = map(data, ~ lm(n ~ 1 + coassembly, data = .)),
+    # Test model fit
+    fit = map(data, ~ lm(n ~ genome_set + coassembly, data = .)),
+    # Model comparison
+    tidy = map(fit, broom::tidy),
+    anova = map2(base_fit, fit, anova),
+    # Significance calculation
+    raw_pval = map_dbl(anova, ~ .x %>% broom::tidy() %>% slice(2) %>% pull(p.value)),
+    pval = p.adjust(raw_pval, method = "fdr"),
+    sig = pval < 0.05,
+    label = map_chr(pval, signif_stars),
+    # For plotting
+    genome_set = "single_binning",
+    y = case_when(
+      group == "ss_sm" ~ 250,
+      group == "ss_mm" ~ 270,
+      group == "sm_mm" ~ 250,
+      ),
+    xmin = ifelse(group == "sm_mm", "single", "single_binning"),
+    xmax = ifelse(group == "ss_sm", "single", "coassembly"),
+  )
+
+single_binning_levels <- c("single_binning", "single", "coassembly")
+single_binning_labels <- c("Single assembly / Single binning", "Single assembly / Co-binning", "Coassembly / Co-binning")
+single_binning_values <- c(colour_brewer$green, colour_brewer$blue, colour_brewer$red)
+
+single_binning_species <- single_binning_metadata %>%
+  distinct(genome_set, coassembly, representative) %>%
+  group_by(genome_set, coassembly) %>%
+  count() %>%
+  mutate(
+    genome_set = factor(genome_set, levels = single_binning_levels),
+    ) %>%
+  ggplot(aes(genome_set, n, fill = genome_set)) +
+  stat_summary(fun = mean, geom = "bar", position = position_dodge(0.9)) +
+  stat_summary(fun.data = mean_sd, geom = "errorbar", colour = "red", position = position_dodge(0.9), width = 0.25) +
+  geom_point(position = position_jitterdodge(dodge.width = 0.9, jitter.width = 1), alpha = 0.5, size = 1) +
+  geom_signif(
+    aes(xmin = xmin, xmax = xmax, annotations = label, y_position = y),
+    data = single_binning_stats, manual = TRUE, textsize = 3
+    ) +
+  scale_x_discrete(breaks = single_binning_levels, labels = single_binning_labels) +
+  scale_y_continuous(expand = c(0, NA), limits = c(0, 280)) +
+  scale_fill_manual(breaks = single_binning_levels, values = single_binning_values) +
+  xlab("") +
+  theme_cowplot() +
+  theme(legend.position = "None") +
+  ylab("Recovered species")
+single_binning_species
+ggsave(here(output_dir, "single_binning_species.png"), dpi = 600, width = 12, height = 7)
 ```
 
 ```{r strain-purity}

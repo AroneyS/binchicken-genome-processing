@@ -470,7 +470,7 @@ genome_across %>%
   summarise(n = mean(n)) %>%
   pivot_wider(names_from = genome_set, values_from = n) %>%
   mutate(
-    single_improvement = single / (both + single),
+    single_improvement = single / (both + coassembly),
     coassembly_improvement = coassembly / (both + single)
     )
 

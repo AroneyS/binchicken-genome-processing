@@ -469,7 +469,10 @@ genome_across %>%
   group_by(genome_set) %>%
   summarise(n = mean(n)) %>%
   pivot_wider(names_from = genome_set, values_from = n) %>%
-  mutate(coassembly_improvement = coassembly / (both + single))
+  mutate(
+    single_improvement = single / (both + single),
+    coassembly_improvement = coassembly / (both + single)
+    )
 
 genome_across %>%
   filter(genome_set == "both") %>%

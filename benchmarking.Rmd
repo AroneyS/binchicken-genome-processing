@@ -271,6 +271,10 @@ co_stats <- bind_rows(
     # Model comparison
     tidy = map(fit, broom::tidy),
     anova = map2(base_fit, fit, anova),
+    df.residual = map_int(anova, ~ .x %>% broom::tidy() %>% pull(df.residual) %>% pluck(2)),
+    df = map_int(anova, ~ .x %>% broom::tidy() %>% pull(df) %>% pluck(2)),
+    sumsq = map_dbl(anova, ~ .x %>% broom::tidy() %>% pull(sumsq) %>% pluck(2)),
+    statistic = map_dbl(anova, ~ .x %>% broom::tidy() %>% pull(statistic) %>% pluck(2)),
     # Significance calculation
     raw_pval = map_dbl(anova, ~ .x %>% broom::tidy() %>% slice(2) %>% pull(p.value)),
     pval = p.adjust(raw_pval, method = "fdr"),
@@ -290,6 +294,10 @@ co_stats <- bind_rows(
     xmin = "single",
     xmax = "coassembly",
   )
+
+co_stats %>%
+  select(group, df.residual, df, sumsq, statistic, raw_pval, pval, label) %>%
+  write_csv(here(output_dir, "co_stats.tsv"))
 
 #############################
 ### Coassembly comparison ###
@@ -572,6 +580,10 @@ single_binning_stats <- bind_rows(
     # Model comparison
     tidy = map(fit, broom::tidy),
     anova = map2(base_fit, fit, anova),
+    df.residual = map_int(anova, ~ .x %>% broom::tidy() %>% pull(df.residual) %>% pluck(2)),
+    df = map_int(anova, ~ .x %>% broom::tidy() %>% pull(df) %>% pluck(2)),
+    sumsq = map_dbl(anova, ~ .x %>% broom::tidy() %>% pull(sumsq) %>% pluck(2)),
+    statistic = map_dbl(anova, ~ .x %>% broom::tidy() %>% pull(statistic) %>% pluck(2)),
     # Significance calculation
     raw_pval = map_dbl(anova, ~ .x %>% broom::tidy() %>% slice(2) %>% pull(p.value)),
     pval = p.adjust(raw_pval, method = "fdr"),
@@ -587,6 +599,10 @@ single_binning_stats <- bind_rows(
     xmin = ifelse(group == "sm_mm", "single", "single_binning"),
     xmax = ifelse(group == "ss_sm", "single", "coassembly"),
   )
+
+single_binning_stats %>%
+  select(group, df.residual, df, sumsq, statistic, raw_pval, pval, label) %>%
+  write_csv(here(output_dir, "single_binning_stats.tsv"))
 
 single_binning_levels <- c("single_binning", "single", "coassembly")
 single_binning_labels <- c("Single assembly / Single binning", "Single assembly / Co-binning", "Coassembly / Co-binning")
@@ -616,6 +632,7 @@ single_binning_species <- single_binning_metadata %>%
   ylab("Recovered species")
 single_binning_species
 ggsave(here(output_dir, "single_binning_species.png"), dpi = 600, width = 12, height = 7)
+ggsave(here(output_dir, "single_binning_species.svg"), dpi = 600, width = 12, height = 7)
 ```
 
 ```{r strain-purity}
@@ -687,17 +704,21 @@ purity_stats <- bind_rows(
   mutate(
     # Base model fit
     base_fit = map2(group, data, ~ {
-      if (.x %in% c("contigs_both", "adj_size_both", "centroid_both")) lm(n ~ 1 + representative, data = .y)
+      if (.x %in% c("contigs_both", "adj_size_both")) lm(n ~ 1 + representative, data = .y)
       else lm(n ~ 1 + coassembly, data = .y)
       }),
     # Test model fit
     fit = map2(group, data, ~ {
-      if (.x %in% c("contigs_both", "adj_size_both", "centroid_both")) lm(n ~ genome_set + representative, data = .y)
+      if (.x %in% c("contigs_both", "adj_size_both")) lm(n ~ genome_set + representative, data = .y)
       else lm(n ~ genome_set + coassembly, data = .y)
       }),
     # Model comparison
     tidy = map(fit, broom::tidy),
     anova = map2(base_fit, fit, anova),
+    df.residual = map_int(anova, ~ .x %>% broom::tidy() %>% pull(df.residual) %>% pluck(2)),
+    df = map_int(anova, ~ .x %>% broom::tidy() %>% pull(df) %>% pluck(2)),
+    sumsq = map_dbl(anova, ~ .x %>% broom::tidy() %>% pull(sumsq) %>% pluck(2)),
+    statistic = map_dbl(anova, ~ .x %>% broom::tidy() %>% pull(statistic) %>% pluck(2)),
     # Significance calculation
     raw_pval = map_dbl(anova, ~ .x %>% broom::tidy() %>% slice(2) %>% pull(p.value)),
     pval = p.adjust(raw_pval, method = "fdr"),
@@ -715,6 +736,10 @@ purity_stats <- bind_rows(
     xmin = "single",
     xmax = "coassembly",
   )
+
+purity_stats %>%
+  select(group, df.residual, df, sumsq, statistic, raw_pval, pval, label) %>%
+  write_csv(here(output_dir, "purity_stats.tsv"))
 
 purity_stats_stratified <- bind_rows(
   # Contigs total
@@ -767,6 +792,10 @@ purity_stats_stratified <- bind_rows(
     # Model comparison
     tidy = map(fit, broom::tidy),
     anova = map2(base_fit, fit, anova),
+    df.residual = map_int(anova, ~ .x %>% broom::tidy() %>% pull(df.residual) %>% pluck(2)),
+    df = map_int(anova, ~ .x %>% broom::tidy() %>% pull(df) %>% pluck(2)),
+    sumsq = map_dbl(anova, ~ .x %>% broom::tidy() %>% pull(sumsq) %>% pluck(2)),
+    statistic = map_dbl(anova, ~ .x %>% broom::tidy() %>% pull(statistic) %>% pluck(2)),
     # Significance calculation
     raw_pval = map_dbl(anova, ~ .x %>% broom::tidy() %>% slice(2) %>% pull(p.value)),
     pval = p.adjust(raw_pval, method = "fdr"),
@@ -784,6 +813,10 @@ purity_stats_stratified <- bind_rows(
     xmin = "single",
     xmax = "coassembly",
   )
+
+purity_stats_stratified %>%
+  select(group, df.residual, df, sumsq, statistic, raw_pval, pval, label) %>%
+  write_csv(here(output_dir, "purity_stats_stratified.tsv"))
 
 ####################
 ### # of contigs ###
@@ -1048,6 +1081,7 @@ computational_benchmarks %>%
   ylab("CPU time taken (min)") +
   theme_cowplot()
 ggsave(here(output_dir, "computational_comb.png"), dpi = 600, width = 12, height = 7)
+ggsave(here(output_dir, "computational_comb.svg"), dpi = 600, width = 12, height = 7)
 
 computational_benchmarks %>%
   filter(stage == "appraise") %>%

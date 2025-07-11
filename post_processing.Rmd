@@ -803,7 +803,7 @@ rrna_vs_trna <- genome_filtered %>%
 rrna_vs_trna
 ggsave(here(output_dir, "rrna_vs_trna.png"), dpi = 600, width = 12, height = 7)
 
-cowplot::plot_grid(
+genome_rnas_plot <- cowplot::plot_grid(
   rrnas_bar + coord_cartesian(xlim = c(0, 3)) + theme(axis.title.x = element_blank(), axis.text.x = element_blank()),
   NULL,
   rrna_vs_trna + coord_cartesian(xlim = c(0, 3), ylim = c(0, 20)),
@@ -813,6 +813,7 @@ cowplot::plot_grid(
   rel_widths = c(1, 0.1),
   rel_heights = c(0.1, 1)
 )
+genome_rnas_plot
 ggsave(here(output_dir, "genome_rnas.png"), dpi = 600, width = 12, height = 7)
 ggsave(here(output_dir, "genome_rnas.svg"), dpi = 600, width = 12, height = 7)
 
@@ -852,6 +853,18 @@ genome_filtered %>%
   filter(!GUNC_pass) %>%
   group_by(genome_quality) %>%
   count()
+
+#################################
+### Combined quality and RNAs ###
+#################################
+cowplot::plot_grid(
+  genome_quality_plot,
+  genome_rnas_plot,
+  nrow = 2,
+  labels = "auto"
+)
+ggsave(here(output_dir, "genome_quality_rnas.png"), dpi = 600, width = 12, height = 14)
+ggsave(here(output_dir, "genome_quality_rnas.svg"), dpi = 600, width = 12, height = 14)
 ```
 
 ```{r low-rep-taxa}
@@ -2026,6 +2039,7 @@ top_row <- cowplot::plot_grid(
   labels = "auto", label_size = 10
 )
 ggsave(here(output_dir, "metagroups.png"), dpi = 600, width = 180, height = 60, units = "mm")
+ggsave(here(output_dir, "metagroups.svg"), dpi = 600, width = 180, height = 60, units = "mm")
 ```
 
 ```{r evaluate}
@@ -2090,6 +2104,7 @@ evaluation %>%
   theme_cowplot() +
   theme(legend.position = c(0.6, 0.7))
 ggsave(here(output_dir, "target_sequences.png"), dpi = 600, height = 7, width = 12)
+ggsave(here(output_dir, "target_sequences.svg"), dpi = 600, height = 7, width = 12)
 
 evaluation %>%
   filter(is_complete) %>%
@@ -2261,6 +2276,8 @@ genome_teas_stats <- genome_teas_pathways %>%
     model = map(data, ~ glm(cbind(n, negative) ~ maggroup, family = binomial(link = logit), data = .)),
     anova = map2(base_model, model, anova, test = "LRT"),
     tidy_anova = map(anova, broom::tidy),
+    df = map_dbl(tidy_anova, ~ .x$df[[2]]),
+    deviance = map_dbl(tidy_anova, ~ .x$deviance[[2]]),
     pval = map_dbl(tidy_anova, ~ .x$p.value[[2]]),
     adj_pval = p.adjust(pval, method = "BH"),
     stars = signif_stars(adj_pval),
@@ -2283,15 +2300,18 @@ genome_teas_stats <- genome_teas_pathways %>%
       tea_group == "Fermentation" ~ 0.164,
       tea_group == "Unknown" ~ 0.112,
       ),
-    ) %>%
-  filter(adj_pval < 0.05)
+    )
+
+genome_teas_stats %>%
+  select(tea_group, df, deviance, pval, adj_pval, stars, max_fold_change, max_change) %>%
+  write_csv(here(output_dir, "genome_teas_stats.csv"))
 
 proteins_teas_pathways_lines <- genome_teas_pathways %>%
   filter(maggroup %in% c(genome_unannotated$genome_rarity %>% levels(), "Undetected")) %>%
   ggplot(aes(maggroup, prop, colour = tea_group, group = tea_group)) +
   geom_line() +
   geom_point() +
-  geom_text(aes(label = label), data = genome_teas_stats, nudge_y = 0.03, size = 5 / .pt) +
+  geom_text(aes(label = label), data = genome_teas_stats %>% filter(adj_pval < 0.05), nudge_y = 0.03, size = 5 / .pt) +
   scale_colour_manual(values = c("#8dd3c7", "#ffffb3", "#bebada", "#fb8072", "#80b1d3", "#fdb462", "#b3de69", "#fccde5", "#d9d9d9", "#ccebc5", "#bc80bd"), drop = FALSE) +
   scale_y_continuous("Proportion of novel species", labels = scales::percent, expand = expansion(mult = c(0, 0))) +
   theme_cowplot() +
